@@ -199,7 +199,7 @@ def msense(A):
     v2 = np.max(np.abs(np.sum((-A.copy()).clip(min=0),1)))
     return np.max([v1,v2])
 
-def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,sigma,verbose=False,squared_output=True,normal_inputs=False):
+def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,sigma,verbose=False):
     '''
     Finds the infinity norm of the inverse covariance matrix
     and the infinity norm of the $Q^{-1} K_{uf} (\Lambda + \sigma^2 I)^{-1}$
@@ -232,10 +232,7 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     normalise outputs (y): zero mean, unit variance
     '''
 
-    if squared_output:
-        y = np.sqrt(y_in) #make it a bit more gaussian
-    else:
-        y = y_in.copy()
+    y = y_in.copy()
         
     ymean = np.mean(y)
     ystd = np.std(y)
@@ -279,15 +276,7 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
             K_MM[i,j] = k(p_in1,p_in2,lengthscales)
     invK_MM = np.linalg.inv(K_MM)
 
-    #covariance between training inputs
-    if normal_inputs: #whether to calculate this (as we might run out of memory)
-        print "Calculating K_NN"
-        sys.stdout.flush()
-        K_NN = np.zeros([len(training_inputs),len(training_inputs)])
-        for i,t_in1 in enumerate(training_inputs):
-            for j,t_in2 in enumerate(training_inputs):
-                K_NN[i,j] = k(t_in1,t_in2,lengthscales)
-
+   
     print "Calculating K_NN diagonals"
     sys.stdout.flush()
     K_NN_diags = np.zeros([len(training_inputs)])
@@ -312,44 +301,25 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
 
     #this finds (\Lambda + \sigma^2 I)^{-1}
     diag = 1.0/(lamb + sigmasqr) #diagonal values
-    #invlambplussigma = np.diag(diag) #note diagonal so can do the inversion first
-    #Q = K_MM + np.dot(np.dot(K_NM.T, invlambplussigma),K_NM)
     
     #rewritten to be considerably less memory intensive (and make it a little quicker)
     Q = K_MM + np.dot(K_NM.T * diag,K_NM)
 
     #find the mean at each test point
     psuedo_mu = np.dot(     np.dot(np.dot(K_star, np.linalg.inv(Q)),K_NM.T) *  diag  ,y)
-    if normal_inputs:
-        normal_mu = np.dot(np.dot(K_Nstar.T,np.linalg.inv(K_NN+sigmasqr*np.eye(K_NN.shape[0]))),y)
-
+   
     #un-normalise our estimates of the mean (one using the pseudo inputs, and one using normal GP regression)
     psuedo_mu = psuedo_mu * ystd
     psuedo_mu = psuedo_mu + ymean
-    if normal_inputs:
-        normal_mu = normal_mu * ystd
-        normal_mu = normal_mu + ymean
-        
+     
     y = y * ystd
     y = y + ymean
 
-    if squared_output:
-        if normal_inputs:
-            normal_mu=normal_mu**2
-        psuedo_mu=psuedo_mu**2
-        y = y**2 #undo the original square-root
-    
     #find the covariance for the two methods (pseudo and normal)
     K_pseudo = np.dot(np.linalg.inv(Q),K_NM.T) * diag
     pseudo_msense = msense(K_pseudo)
-    if normal_inputs:
-        K_normal = K_NN + sigma * np.eye(K_NN.shape[0])
-        normal_msense = msense(np.linalg.inv(K_normal))
-    else:
-        normal_msense = None
-        normal_mu = None
-    
-    return test_cov, normal_msense, pseudo_msense, normal_mu, psuedo_mu, K_pseudo
+   
+    return test_cov, pseudo_msense, psuedo_mu, K_pseudo
     
 def draw_sample(test_cov, test_inputs, mu, msense, sens, delta, eps):
     """
