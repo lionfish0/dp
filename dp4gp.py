@@ -243,6 +243,7 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
 
     sigmasqr = sigma**2
     
+    normal_peroutput_msense = None
     normal_msense = None
     normal_mu = None  
     K_normal = None   
@@ -323,7 +324,6 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     pseudo_mu = np.dot(     np.dot(np.dot(K_star, np.linalg.inv(Q)),K_NM.T) *  diag  ,y)
     if calc_normal:
         normal_mu = np.dot(np.dot(K_Nstar.T,np.linalg.inv(K_NN+sigmasqr*np.eye(K_NN.shape[0]))),y)
-       
    
     #un-normalise our estimates of the mean (one using the pseudo inputs, and one using normal GP regression)
     pseudo_mu = pseudo_mu * ystd
@@ -336,17 +336,28 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     y = y + ymean
 
     #find the covariance for the two methods (pseudo and normal)
-    K_pseudo = np.dot(np.linalg.inv(Q),K_NM.T) * diag
-    pseudo_msense = msense(K_pseudo)
+    #K_pseudoInv is the matrix in: mu = k_* K_pseudoInv y
+    #i.e. it does the job of K^-1 for the inducing inputs case
+    K_pseudoInv = np.dot(np.linalg.inv(Q),K_NM.T) * diag
+    
+    invlambplussigma = np.diag(1.0/(lamb + sigmasqr)) 
+    assert (K_pseudoInv == np.dot(np.dot(np.linalg.inv(Q),K_NM.T),invlambplussigma)).all() #check our optimisation works
+    
+    #find the sensitivity for the pseudo (inducing) inputs
+    pseudo_msense = msense(K_pseudoInv)
+    
+    #if we're finding the 'normal' GP results
     if calc_normal:
         K_normal = K_NN + sigma * np.eye(K_NN.shape[0])
         invCov = np.linalg.inv(K_normal)
+        #normal GP sensitivity
         normal_msense = msense(invCov)
+        #this finds the sensitivity per test point (using the training inputs)
         normal_peroutput_msense = np.max(np.abs(np.dot(K_Nstar.T, invCov)),1)
-    print(K_Nstar.shape)
-    print(K_pseudo.shape)
-    pseudo_peroutput_msense = np.max(np.abs(np.dot(K_Nstar.T, K_pseudo.T)),1)
-    return test_cov, normal_msense, pseudo_msense, normal_peroutput_msense, pseudo_peroutput_msense, normal_mu, pseudo_mu, K_normal, K_pseudo
+        
+    #this finds the sensitivity per test point (using the inducing inputs)
+    pseudo_peroutput_msense = np.max(np.abs(np.dot(K_star, K_pseudoInv)),1)
+    return test_cov, normal_msense, pseudo_msense, normal_peroutput_msense, pseudo_peroutput_msense, normal_mu, pseudo_mu, K_normal, K_pseudoInv
     
 def draw_sample(test_cov, test_inputs, mu, msense, sens, delta, eps):
     """
