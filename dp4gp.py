@@ -374,10 +374,6 @@ def draw_sample(test_cov, test_inputs, mu, msense, sens, delta, eps):
     """
     G = np.random.multivariate_normal(np.zeros(len(test_inputs)),test_cov)
     noise = G*sens*np.sqrt(2*np.log(2/delta))/eps
-    import collections
-    if isinstance(msense, collections.Sequence):
-        noise = np.dot(G,msense)
-    else:
-        noise = msense * G
+    noise = noise * msense #we want to do element-wise product 
     dp_mu = np.array(mu) + noise
     return dp_mu

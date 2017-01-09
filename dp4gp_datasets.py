@@ -30,17 +30,26 @@ def add_citibike_extra_columns(df):
     df['tripduration_hours'] = df['tripduration']/3600.0
     
     
-def load_citibike():
+def load_citibike(station=300,year=2016,month=6):
     """
-    Download and load station 300 data for June 2016.
+    Download and load station 300 data for June 2016 (default).
     Returns a pandas dataframe
+    
+    parameters:
+        station = id of station, set to None to use all stations
+        year = 2016 by default
+        month = 6 by default
     """
-    if not os.path.isfile('201606-citibike-tripdata.csv'):
-        os.system('wget https://s3.amazonaws.com/tripdata/201606-citibike-tripdata.zip')
-        os.system('unzip 201606-citibike-tripdata.zip')
-    full_df = pd.read_csv('201606-citibike-tripdata.csv')
+    yearmonthstring = "%04d%02d" % (year, month)
+    if not os.path.isfile('%s-citibike-tripdata.csv' % yearmonthstring):
+        os.system('wget https://s3.amazonaws.com/tripdata/%s-citibike-tripdata.zip' % yearmonthstring)
+        os.system('unzip %s-citibike-tripdata.zip' % yearmonthstring)
+    full_df = pd.read_csv('%s-citibike-tripdata.csv' % yearmonthstring)
 
-    df = full_df[full_df['start station id']==300].copy() #we'll just use one station (number 300)
+    if station is not None:
+        df = full_df[full_df['start station id']==station].copy() #we'll just use one station (number 300)
+    else:
+        df = full_df
     return df
 
 def load_pricepaid():
