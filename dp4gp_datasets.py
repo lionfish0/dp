@@ -50,6 +50,7 @@ def load_citibike(station=300,year=2016,month=6):
         df = full_df[full_df['start station id']==station].copy() #we'll just use one station (number 300)
     else:
         df = full_df
+        
     return df
 
 def load_pricepaid():
