@@ -154,22 +154,30 @@ def transform(data,normalisation_mean=np.NAN,normalisation_std=np.NAN):
     '''
     Normalises the data, or scales using the normalisation mean and std. Returns the used mean and std
     '''
-    data[data<0] = 0
-    result = np.sqrt(data)
+    #data[data<0] = 0
+    #result = np.sqrt(data)
+    result = data
     if normalisation_mean is np.NAN:
         normalisation_mean = np.mean(result)
         normalisation_std = np.std(result)
-    result -= normalisation_mean
-    result /= normalisation_std
-    return result, normalisation_mean, normalisation_std
+        result = result - normalisation_mean
+        result = result / normalisation_std
+        return result, normalisation_mean, normalisation_std
+    else:
+        result = result - normalisation_mean
+        result = result / normalisation_std
+        return result
+
+
 
 def untransform(data,normalisation_mean,normalisation_std):
     '''
     Un-normalises the data using the mean and std specified
     '''
-    data *= normalisation_std
-    data += normalisation_mean
-    result = data**2
+    data = data * normalisation_std
+    data = data + normalisation_mean
+    #result = data**2
+    result = data
     return result
     
     
@@ -214,6 +222,7 @@ def msense(A):
     v2 = np.max(np.abs(np.sum((-A.copy()).clip(min=0),1)))
     return np.max([v1,v2])
 
+
 def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,sigma,verbose=False,calc_normal=False,scale=None):
     '''
     Finds the sensitivity using the inverse covariance matrix
@@ -251,13 +260,6 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     '''
 
     y = y_in.copy()
-        
-    ymean = np.mean(y)
-    ystd = np.std(y)
-    y = y - ymean
-    y = y / ystd
-    sigma = sigma / ystd
-
     sigmasqr = sigma**2
     
     normal_peroutput_msense = None
@@ -272,6 +274,8 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     for i,t_in1 in enumerate(test_inputs):
         for j,t_in2 in enumerate(test_inputs):
             test_cov[i,j] = k(t_in1,t_in2,lengthscales,scale,rbf)
+    print "Minimum eigen value: %0.3f" % np.min(np.linalg.eig(test_cov)[0])
+    print "Maximum K** %0.2f" % np.max(test_cov) #make this an assertion <=1    
 
     #covariance between training inputs and test inputs
     print "Calculating covariance between training inputs and test inputs"
@@ -280,6 +284,7 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     for i,t_in in enumerate(training_inputs):
         for j,p_in in enumerate(test_inputs):
             K_Nstar[i,j] = k(t_in,p_in,lengthscales,scale,rbf)
+    print "Maximum k* %0.2f" % np.max(K_Nstar) #make this an assertion <=1
 
     #covariance between training inputs and pseudo inputs
     print "Calculating K_NM"
@@ -312,6 +317,7 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     for i,t_in in enumerate(test_inputs):
         for j,p_in in enumerate(pseudo_inputs):
             K_star[i,j] = k(t_in,p_in,lengthscales,scale,rbf)
+    print "Maximum k* %0.2f" % np.max(K_star) #make this an assertion <=1            
             
     #covariance between training inputs
     if calc_normal: #whether to calculate this (as we might run out of memory/time)
@@ -344,14 +350,6 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
         normal_covars = test_cov - np.dot(np.dot(K_Nstar.T,np.linalg.inv(K_NN+sigmasqr*np.eye(K_NN.shape[0]))),K_Nstar)
    
     #un-normalise our estimates of the mean (one using the pseudo inputs, and one using normal GP regression)
-    pseudo_mu = pseudo_mu * ystd
-    pseudo_mu = pseudo_mu + ymean
-    if calc_normal:
-        normal_mu = normal_mu * ystd
-        normal_mu = normal_mu + ymean
-     
-    y = y * ystd
-    y = y + ymean
 
     #find the covariance for the two methods (pseudo and normal)
     #K_pseudoInv is the matrix in: mu = k_* K_pseudoInv y
@@ -366,7 +364,7 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     
     #if we're finding the 'normal' GP results
     if calc_normal:
-        K_normal = K_NN + sigma * np.eye(K_NN.shape[0])
+        K_normal = K_NN + sigmasqr * np.eye(K_NN.shape[0])
         invCov = np.linalg.inv(K_normal)
         #normal GP sensitivity
         normal_msense = msense(invCov)
@@ -378,7 +376,6 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     
     #sample_covariance values are the diagonal of the test input covariances minus 
     #(cov of test+pseudo).(inv cov of pseudo).(transpose of cov of test+pseudo)
- 
     return test_cov, normal_msense, pseudo_msense, normal_peroutput_msense, pseudo_peroutput_msense, normal_mu, pseudo_mu, K_normal, K_pseudoInv, normal_covars
     
 def draw_sample(test_cov, test_inputs, mu, msense, sens, delta, eps, verbose=False):
