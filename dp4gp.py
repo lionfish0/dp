@@ -220,6 +220,8 @@ def msense(A):
     """
     v1 = np.max(np.abs(np.sum(A.copy().clip(min=0),1)))
     v2 = np.max(np.abs(np.sum((-A.copy()).clip(min=0),1)))
+    #print "msense"
+    #print np.abs(np.sum(A.copy().clip(min=0),1))
     return np.max([v1,v2])
 
 
@@ -274,8 +276,8 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     for i,t_in1 in enumerate(test_inputs):
         for j,t_in2 in enumerate(test_inputs):
             test_cov[i,j] = k(t_in1,t_in2,lengthscales,scale,rbf)
-    print "Minimum eigen value: %0.3f" % np.min(np.linalg.eig(test_cov)[0])
-    print "Maximum K** %0.2f" % np.max(test_cov) #make this an assertion <=1    
+    #print "Minimum eigen value: %0.3f" % np.min(np.linalg.eig(test_cov)[0])
+    #print "Maximum K** %0.2f" % np.max(test_cov) #make this an assertion <=1    
 
     #covariance between training inputs and test inputs
     print "Calculating covariance between training inputs and test inputs"
@@ -284,7 +286,7 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
     for i,t_in in enumerate(training_inputs):
         for j,p_in in enumerate(test_inputs):
             K_Nstar[i,j] = k(t_in,p_in,lengthscales,scale,rbf)
-    print "Maximum k* %0.2f" % np.max(K_Nstar) #make this an assertion <=1
+    #print "Maximum k* %0.2f" % np.max(K_Nstar) #make this an assertion <=1
 
     #covariance between training inputs and pseudo inputs
     print "Calculating K_NM"
@@ -327,7 +329,6 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
         for i,t_in1 in enumerate(training_inputs):
             for j,t_in2 in enumerate(training_inputs):
                 K_NN[i,j] = k(t_in1,t_in2,lengthscales,scale,rbf)
-    
 
     #lambda values are the diagonal of the training input covariances minus 
     #(cov of training+pseudo).(inv cov of pseudo).(transpose of cov of training+pseudo)
@@ -370,6 +371,33 @@ def get_noise_scale(y_in,test_inputs,training_inputs,pseudo_inputs,lengthscales,
         normal_msense = msense(invCov)
         #this finds the sensitivity per test point (using the training inputs)
         normal_peroutput_msense = np.max(np.abs(np.dot(K_Nstar.T, invCov)),1)
+        print "THING"
+        print np.dot(K_Nstar.T, invCov).shape
+        print np.dot(K_Nstar.T, invCov)
+       # print test_cov**-.5
+        tot = np.dot(test_cov**-.5,np.max(np.dot(K_Nstar.T, invCov),1))
+       # print tot
+        print np.sqrt(np.sum(tot**2))
+       # print "---"
+       # normal_msense = np.sqrt(np.sum(tot**2))
+        
+        #s = np.zeros([len(training_inputs),len(test_inputs)])
+        #for m,t_in3 in enumerate(training_inputs):
+        #    for j,t_in2 in enumerate(test_inputs):
+        #        for i,t_in in enumerate(training_inputs):
+        #            print invCov[i,m] * K_Nstar[i,j]
+        #            s[m,j] += invCov[i,m] * K_Nstar[i,j]
+        #np.max(s) should be equal to max(normal_peroutput_msense). Need assert?
+        #print "K_Nstar!"
+        #print K_Nstar
+        #print "s!"
+        #print s
+        #print "invCov"
+        #print invCov
+        #print "normal msense"
+        #print normal_msense
+    #print "MAX:"
+    #print np.max(K_Nstar)
         
     #this finds the sensitivity per test point (using the inducing inputs)
     pseudo_peroutput_msense = np.max(np.abs(np.dot(K_star, K_pseudoInv)),1)
