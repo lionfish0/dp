@@ -4,6 +4,8 @@ import GPy
 from sklearn.metrics import mean_squared_error
 import numpy as np
 import sys
+import scipy
+from scipy.stats import multivariate_normal
 
 ######### Functions to help with adding noise to the inputs
 
@@ -220,8 +222,6 @@ def msense(A):
     """
     v1 = np.max(np.abs(np.sum(A.copy().clip(min=0),1)))
     v2 = np.max(np.abs(np.sum((-A.copy()).clip(min=0),1)))
-    #print "msense"
-    #print np.abs(np.sum(A.copy().clip(min=0),1))
     return np.max([v1,v2])
 
 
@@ -430,6 +430,163 @@ def draw_sample(test_cov, test_inputs, mu, msense, sens, delta, eps, verbose=Fal
         print("Noise scale:   %0.4f" % (sens*np.sqrt(2*np.log(2/delta))/eps))
         print("Total noise:   %0.4f" % (msense*sens*np.sqrt(2*np.log(2/delta))/eps))
         
-        
-            
     return dp_mu
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+##### Functions for vector-DP methods
+
+#The test and training input locations
+#tests = np.arange(-10,20,0.5) #np.array([0.0,1.0,2.0]) #np.arange(-5,15,1.0) #
+#train = np.arange(0,10,0.1) #np.array([0.0,1.5]) #np.arange(0,5,0.1) # #
+
+#other parameters (lengthscale, noise-std, (eps,delta)-DP)
+#lengthscales = 4.0
+#sigma = 1.0
+#delta = 0.01
+#eps = 2.0
+#sens = 8 #sens=\Delta_y i.e. how much the outputs can vary by.
+
+def calc_covariances(train,tests,lengthscales,sigma):
+    #calculate covariance between test+train, and between training points
+    Kstar = np.zeros([len(tests),len(train)])
+    for i,x in enumerate(tests):
+        for j,y in enumerate(train):
+            Kstar[i,j] = rbf(x,y,lengthscales)
+    K = np.zeros([len(train),len(train)])
+    for i,x in enumerate(train):
+        for j,y in enumerate(train):
+            K[i,j] = rbf(x,y,lengthscales)
+    K+=sigma**2*np.eye(len(train)) #add diagonal sample noise variance
+    return K, Kstar
+
+def calcM(ls,cs):
+    """
+    Find the covariance matrix, M, as the lambda weighted sum of c c^T
+    """
+    d = len(cs[0])
+    M = np.zeros([d,d])
+    ccTs = []
+    for l,c in zip(ls,cs):
+        ccT = l*np.dot(c,c.transpose())
+        M = M + ccT
+        ccTs.append(ccT)
+      
+    return M, ccTs
+
+def calc_Delta(M,cloak):
+    halfM = np.real(scipy.linalg.sqrtm(M)) #occasionally goes minutely complex.
+    invhalfM = np.linalg.pinv(halfM)
+    assert np.sum(np.dot(halfM,halfM)-M)<0.001 #(M^.5).(M^.5) should equal M.
+    inner = np.dot(invhalfM,cloak) #this is how much M^-.5 (v_D - v_D') move for each test/training point pair
+    Delta = np.max(np.sqrt(np.sum(inner**2,0))) #here we find the norm_2 for each column, and find the max of these norms    
+    return Delta
+    
+#def rand_bin_array(K, N):
+#    arr = np.zeros(N)
+#    arr[:K]  = 1
+#    np.random.shuffle(arr)
+#    return arr
+    
+def findLambdas(cs,tempcloak):
+    #TODO Rewrite with just a matrix C, instead of a messy list of vectors.
+    #also tempcloak is here just to let us temporarily compute Delta for debugging purposes.
+    #this matrix is the 'C' matrix which will be the only parameter.
+
+    #lambdas  (how to initialise?)
+#    ls = np.ones(len(cs))
+    ls = 1+np.random.randn(len(cs))
+    
+    
+    #learning rate
+    lr = 1.0 #TODO Pick reasonable number?
+    #gradient descent
+    lsbefore = ls.copy()
+    max_its = 1000
+    best_delta = np.Inf
+    best_ls = ls.copy()
+    for it in range(max_its):
+        M,ccTs = calcM(ls,cs)
+        #M = M + np.eye(len(M))*0.0000001
+        Minv = np.linalg.pinv(M)
+
+        #find new Trace (P sum(cc^T)) for each c
+        TrPccTs = []
+        for ccT in ccTs:
+            TrPccTs.append(np.trace(np.dot(Minv,ccT)))
+
+        #normalise lambda (should sum to either n or d)!!!
+        deltals = np.array(TrPccTs)*lr
+        #deltals = np.dot(rand_bin_array(25,len(deltals)),deltals)
+        ls = np.array(ls) + deltals
+        ls /= np.sum(ls)
+        ls *= np.linalg.matrix_rank(M)
+        #ls[ls>0.95] = 1.0
+        #ls[ls<0.05] = 0.0
+        if (np.sum((lsbefore-ls)**2)<1e-20):
+            print("Converged after %d iterations" % it)
+            break #reached ~maximum
+        Delta = calc_Delta(M,tempcloak) #temporarily calculated!
+        if it % 100 == 1:
+            lr = lr * 0.8
+            print("sum squared change in lambdas: %e. Delta=%0.4f. Delta^2 x det(M)=%e, (lr = %e)" % (np.sqrt(np.sum((lsbefore-ls)**2))/lr,Delta,Delta**2 * np.linalg.det(M),lr))
+        if Delta<best_delta:
+            best_delta = Delta
+            best_ls = ls
+        lsbefore = ls.copy()
+        
+    if it==max_its-1:
+        #TODO Throw exception? 
+        print("Ended before convergence")
+    ls = best_ls #we'll go with the best ones we've found!
+    return ls
+    
+def calc_DP_noise(train,tests,lengthscales,delta_Y,sigma,eps,delta):
+    #TODO Add comment describing fn
+    #TODO Add asserts on shapes of train and test etc
+    K,Kstar = calc_covariances(train,tests,lengthscales,sigma)
+    
+    #cloak is a matrix describing how much each training point affects each test point
+    cloak = np.dot(Kstar,np.linalg.inv(K))
+    cs = []
+    for c in (cloak.transpose()):  #TODO We need to turn loops into matrix operations for speed
+        cs.append(c[:,None])
+
+    ls = findLambdas(cs,cloak)
+    print("Lambdas:")
+    print(ls)
+    M,ccTs = calcM(ls,cs)
+    
+    #to find Delta, we need to find M^-.5 
+    halfM = np.real(scipy.linalg.sqrtm(M)) #occasionally goes minutely complex.
+    invhalfM = np.linalg.pinv(halfM)
+    assert np.sum(np.dot(halfM,halfM)-M)<0.001 #(M^.5).(M^.5) should equal M.
+
+    #cloak is a matrix which describes the effect of every training point on every test point
+    #so the columns of M^-.5 x cloak are the results of   M^-.5 (v_D - v_D')   for each training input
+    #we are interested in the greatest value of M^-.5 (v_D - v_D') = M^-.5 x Cloak. 
+    #The result of that product is a matrix with each column holding the M scaled effect of
+    #perturbing a training point.
+    #we therefore need to find ||.||_2 of each column, and then find the maximum of these norms.
+    #
+    #(note, could swap order of sqrt and max, to save compute)
+
+    Delta = calc_Delta(M,cloak)
+    print("Delta = %0.2f" % Delta) #we expect this to be <=1 because of our method for creating M
+    if Delta<1.0000001: #<=1 (but added .0001 for numerical instability. Note: doesn't really matter for DP if it is >1)
+        print("WARNING: Delta should be <=1, but is %0.5f" % Delta) 
+    #DP calculation to find scaled GP DP noise samples
+    c = np.sqrt(2*np.log(2/delta))
+    sampcov = ((delta_Y*c*Delta/eps)**2)*M
+    return sampcov, K, Kstar
