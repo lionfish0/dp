@@ -24,7 +24,6 @@ class DPGP(object):
         self.sens = sens
         self.epsilon = epsilon
         self.delta = delta
-        assert epsilon<=1, "The proof in Hall et al. 2013 is restricted to values of epsilon<=1."
     
     def draw_prediction_samples(self,Xtest,N=1):
         GPymean, covar = self.model.predict(Xtest)
@@ -166,6 +165,7 @@ class DPGP_cloaking(DPGP):
     
     def __init__(self,model,sens,epsilon,delta):      
         super(DPGP_cloaking, self).__init__(model,sens,epsilon,delta)
+        assert epsilon<=1, "The proof in Hall et al. 2013 is restricted to values of epsilon<=1."
 
     def calcM(self,ls,cs):
         """
