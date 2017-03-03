@@ -7,6 +7,8 @@ import sys
 import scipy
 from scipy.stats import multivariate_normal
 from scipy.optimize import minimize
+import matplotlib.pyplot as plt
+
 
 class DPGP(object):
     """(epsilon,delta)-Differentially Private Gaussian Process predictions"""
