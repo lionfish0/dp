@@ -253,6 +253,10 @@ class DPGP_cloaking(DPGP):
         bestLogDetM = np.Inf
         bestls = None        
         for it in range(Nattempts):
+            print "."
+            import sys
+            sys.stdout.flush()
+            
             ls = self.findLambdas_grad(cs,Nits)
             if np.min(ls)<-0.01:
                 continue
@@ -331,9 +335,10 @@ class DPGP_cloaking(DPGP):
         ###
         return mu, samps, sampcov
     
-    def plot(self,N=20):
-        p = self.model.plot(legend=False)
-        xlim = p.axes.get_xlim()        
+    def plot(self,fixed_inputs=[],N=20):
+        p = self.model.plot(fixed_inputs=fixed_inputs,legend=False)
+        xlim = p.axes.get_xlim()
+        
         Xtest = np.arange(xlim[0],xlim[1],(xlim[1]-xlim[0])/100.0)[:,None]
         mu = self.draw_prediction_samples(Xtest,N)
         plt.plot(Xtest,mu,'-k',alpha=0.3)
