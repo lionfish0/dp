@@ -1,9 +1,94 @@
-# Methods for loading dataset for demonstrating the DP4GP tools
-
 import pandas as pd
 from datetime import datetime
 import numpy as np
 import os
+
+import pymc as pm
+import numpy as np
+import pandas as pd
+import re
+import xml.etree.ElementTree as ET
+import urllib2
+import sqlite3 as lite
+import urllib
+import zipfile,os.path,os
+import sqlalchemy as sa
+import pandas as pd
+import csv
+from StringIO import StringIO
+from zipfile import ZipFile
+import shutil
+import time
+from datetime import datetime
+import random
+
+def adjustpostcode(postcode):
+    """Formats postcode into 7 character format, so "a1 2cd" becomes "A1  2CD" or "Gl54 1AB" becomes "GL541AB"."""
+    postcode = postcode.upper()
+    res = re.search('([A-Z]{1,2}[0-9]{1,2}) *([0-9][A-Z]{2})',postcode);
+    if (res==None):
+        return postcode #TODO can't understand it, just send it back, need to do something better, throw an exception?
+    groups = res.groups()
+    if len(groups)==2:
+        first = groups[0]
+        last = groups[1]
+        middle = " "*(7-(len(first)+len(last)))
+        return first+middle+last
+    return postcode 
+
+def go_get_data(postcodes,dataset,pathToData=''):
+    """
+    Returns a list of dictionaries, one for each postcode, providing the latitude, longitude, output area and an array of datafor each
+    """
+    results = []
+    geoAreas = []
+    for postcode in postcodes:
+        pc = adjustpostcode(postcode)
+        pathToData = ''
+        conn = lite.connect(pathToData+'geo.db')
+        geodb = conn.cursor()        
+        c_oa = geodb.execute("SELECT oa11, lat, long FROM geo WHERE pcd=?;",(pc,));
+        oa = None;
+        for r in c_oa:
+            results.append({'oa':str(r[0]),'lat':r[1],'lon':r[2],'postcode':postcode})
+            geoAreas.append(str(r[0]))
+
+    geoAreaslist = ','.join(geoAreas)    
+    #QS414EW
+    #url = "http://web.ons.gov.uk/ons/api/data/dataset/QS102EW.xml?context=Census&apikey=cHkIiioOQX&geog=2011STATH&diff=&totals=false&dm/2011STATH=%s" % geoAreaslist
+    url = "http://web.ons.gov.uk/ons/api/data/dataset/%s.xml?context=Census&apikey=cHkIiioOQX&geog=2011STATH&diff=&totals=false&dm/2011STATH=%s" % (dataset,geoAreaslist)
+    response = urllib2.urlopen(url)
+    xmlstring = response.read();
+    xmlstring = re.sub('(xmlns:[^=]*)="[^"]*"', '\\1="_"', xmlstring)
+    root = ET.fromstring(xmlstring);
+    
+    data_results = {}
+    for a in root.findall("{_}genericData/{_}DataSet/{_}Group/{_}Series"):
+        loc = a.find("{_}SeriesKey/{_}Value[@concept='Location']")
+        if loc is None:            
+            continue
+        location_string = loc.attrib['value']
+        if location_string not in data_results:
+            data_results[location_string] = []
+        for dp in a.findall("{_}Obs/{_}ObsValue"):
+            data_string = dp.attrib['value']
+            data_results[location_string].append( float(data_string) )
+    
+    for res in results:
+        for i,d in enumerate(data_results[res['oa']]):
+            res[dataset+"_%d" % i] = d
+       #res[dataset] = data_results[res['oa']]
+    return results
+
+def get_data(postcodes,dataset,pathToData=''):
+    chunksize = 149
+    results = []
+    while len(postcodes)>0:
+        num = min(chunksize,len(postcodes))
+        results.extend(go_get_data(postcodes[0:num],dataset,pathToData))
+        del postcodes[0:num]
+        time.sleep(2) #just give their server some time
+    return results
 
 def add_citibike_extra_columns(df):
     """
@@ -53,17 +138,40 @@ def load_citibike(station=300,year=2016,month=6):
         
     return df
 
+
 def load_pricepaid():
     """
     Download and load UK housing price data from the Land Registry, 2016
     Returns panda dataframe with just the price and postcode
     """
     #for the year's data, use: http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com/pp-2016.txt
+    # for the whole history of sales use: http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com/pp-complete.csv
+    
+    #Property Type 	D = Detached, S = Semi-Detached, T = Terraced, F = Flats/Maisonettes, O = Other
 
-    filename = "pp-monthly-update-new-version.csv"
-    if not os.path.isfile(filename):
-        os.system('wget http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com/'+filename)
-    pp = pd.read_csv(filename,header=None,usecols=[1,3],names=["price", "postcode"])
+    #reading the whole landregistry for 24 million records from 1995-2016 takes a lot of time, so we
+    #produce a subsampled set of just 300,000 purchases, which are returned instead
+    
+    filename = "pp-complete.csv"
+    if not os.path.isfile('sampled_pp.csv'):        
+        if not os.path.isfile(filename):        
+            os.system('wget http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com/'+filename)
+        pp = pd.read_csv(filename,header=None,usecols=[1,2,3,4],names=["price", "date", "postcode", "type"])
+        pp = pp.ix[random.sample(pp.index, 300000)]
+        pp.to_csv('sampled_pp.csv')
+    else:
+        print("Using presampled dataset.")
+    pp = pd.read_csv('sampled_pp.csv')
+
+    #add seconds since epoch and year.
+    seconds = np.zeros(len(pp))
+    years = seconds.copy()
+    for i,date in enumerate(pp['date']):
+        seconds[i] = int(datetime.strptime(date, '%Y-%m-%d %H:%M').strftime("%s"))
+        years[i] = int(datetime.strptime(date, '%Y-%m-%d %H:%M').strftime("%Y"))
+    pp['seconds'] = seconds
+    pp['years'] = years
+    print("Loaded property prices.")
     return pp
     
 def load_postcode():
@@ -96,7 +204,63 @@ def load_prices_and_postcode():
     pc = load_postcode()
     complete = pd.merge(pc,pp,on="postcode",how="inner")
     return complete
+
+def add_ons_column(df,dataset):
+    """
+    This adds a column from the ONS dataset. It makes API queries to the census API, and so it is recommended 
+    that it only be used on a reduced dataset.
+    """
+    x = df['postcode'].values.tolist()
+    ons_results = get_data(x,dataset)    
+    ons_df = pd.DataFrame(ons_results).drop_duplicates()
+    return pd.merge(df,ons_df,on="postcode",how="inner")
     
+def setup_postcodes(pathToData):
+    """Creates databases and files, downloads data, and populates the datafiles"""       
+    url = "https://ago-item-storage.s3-external-1.amazonaws.com/a26683d2393743f4b87c89141cd1b2e8/NSPL_FEB_2017_UK.zip?X-Amz-Security-Token=FQoDYXdzEOz%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDNnej9L6SZy5Qb3j8iKcA8DP4euIlUueTPtPplc0%2Ft2xEqK558PzosoBZG03VDr5kDJSTHYfvxXUTsaQM3KHYrAJjd7QMzPuzPRV6Vin%2FP6W5ZMa%2FKFmOQ7i33WJF4i9l17HSrq4PzMmfAENbBXVyBvBVSIgSdbZ61RLsunOz1Z%2Fz1%2FLtVFikM20J1ZUsyOeNCuDsgJMqH3KmIiwnfqSJdb%2FqyE2w3%2FBDlw8%2Fn1tGmP01bzL%2BPRk%2BXrNVbCi1Qzv%2F8QqJTjTrLGn3qWNXg48lt86RObkOtpfr9JY26D%2FpvrFZS6%2FAKKryFBBTvKcprjnE9EOpGbS8ouwaOdWg03sK0yoR%2Ffkns%2BoaEdgAmTnvtxGUfg7oxDu%2BczwP7s1ddvyTwUSdKsllN38Rpv%2Bhyb5i35iKdWHqM2pFiBGzIj29%2BCHTs%2BkDXAepj3a194nwxSceMlJUgsIhE3NtSkKkIyFPYR0FMzKapOf3zNXrv9jgS6YfKoVaigMWfFLLQM8RqyRkguT93Zoiz%2BPuJa3GC7f5JRf4EEvICNDPgmgbZY47Vj7AHRECO6S3F7G%2FEAo84r1xQU%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20170306T120558Z&X-Amz-SignedHeaders=host&X-Amz-Expires=300&X-Amz-Credential=ASIAI32ZWKV2CB37RBWQ%2F20170306%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=a038f0108ed73b2e42c7fa994065edb4e5cb5b4e91a2391adfd701aa349d497e"
+    print "Creating postcode database in %s" % (pathToData+'geo.db')
+    if os.path.isfile(pathToData+'geo.db'):
+        print "geo.db exists, skipping"
+        return
+    print "Downloading "+url
+    if os.path.exists('/tmp/psych_postcodes'):
+        shutil.rmtree('/tmp/psych_postcodes')
+    os.makedirs('/tmp/psych_postcodes')
+    urllib.urlretrieve(url, "/tmp/psych_postcodes/postcodes.zip")
+    postcode_zipfile = "/tmp/psych_postcodes/postcodes.zip"
+
+    print "Opening postcodes.zip"
+    zf = zipfile.ZipFile(postcode_zipfile)
+    for f in zf.infolist():       
+        zf.extract(f.filename,"/tmp/psych_postcodes")
+
+    print "Importing CSV file to sqlite"  #note:Switched from using pandas as it ran out of memory.
+
+
+    csvfile = '/tmp/psych_postcodes/Data/NSPL_FEB_2017_UK.csv'
+    csvReader = csv.reader(open(csvfile), delimiter=',', quotechar='"')
+    conn = lite.connect(pathToData+'geo.db')
+
+    conn.execute('CREATE TABLE IF NOT EXISTS geo (pcd TEXT, oa11 TEXT, lsoa11 TEXT, lat REAL, long REAL)')
+    firstRow = True
+    n = 0
+    for row in csvReader:
+        n+=1
+        if (n%500000==0):
+            print "     %d rows imported" % n                
+        if firstRow:
+            firstRow = False
+            continue
+        conn.execute('INSERT INTO geo (pcd, oa11, lsoa11, lat, long) values (?, ?, ?, ?, ?)', (row[0],row[9],row[24],row[32], row[33]))
+
+    print "     Creating indices"        
+    conn.execute('CREATE INDEX pcds ON geo(pcd)')
+    conn.execute('CREATE INDEX oa11s ON geo(oa11)')
+    print "Complete"
+    conn.close()
+    
+
+
 def load_fishlength():
     """
     Returns a matrix of:
