@@ -81,13 +81,14 @@ def go_get_data(postcodes,dataset,pathToData=''):
     return results
 
 def get_data(postcodes,dataset,pathToData=''):
-    chunksize = 149
+    chunksize = 200
     results = []
     while len(postcodes)>0:
         num = min(chunksize,len(postcodes))
         results.extend(go_get_data(postcodes[0:num],dataset,pathToData))
         del postcodes[0:num]
         time.sleep(2) #just give their server some time
+        print("%d remaining" % len(postcodes))
     return results
 
 def add_citibike_extra_columns(df):

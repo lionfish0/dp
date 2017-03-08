@@ -9,6 +9,67 @@ from scipy.stats import multivariate_normal
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 
+def compute_Xtest(X,fixed_inputs=[],extent_lower={},extent_upper={},percent_extra=0.1,steps=10):
+    """
+    Produce a matrix of test points, does roughly what meshgrid does, but for
+    arbitrary numbers of dimensions, and handles fixed_inputs, etc etc.
+        - Pass X (training data)
+        - can also specify extent
+            - extent_lower/upper are dictionaries, e.g. {0:5.2,1:4.3}, with the
+              index of the dimension and the start value. Note that if you
+              specify fixed_inputs then the extents will be overridden.
+        - if extend is not specified, the method will use the data's extent
+              it adds an additional "percent_extra" to each dimension.
+        - steps = number of steps, either an integer or a list of integers (one
+              for each dimension)
+              
+    Example:
+            X is 4d, we fix dimensions 0 and 1. We make dimension 2 start at zero
+            and have 3 steps in that dimension and 10 in the last dimension, giving
+            us 30 points in our output.
+        Xtest = compute_Xtest(X, [(1,180e3),(0,528e3)], extent_lower={2:0},steps=[1,1,3,10])   
+    """
+    rangelist = []
+    lower = np.zeros(X.shape[1])
+    upper = lower.copy()
+    step = lower.copy()
+    
+    free_inputs = []
+    
+    if type(steps)==int:
+        steps = np.ones(X.shape[1])*steps
+        
+    for i,(start,finish) in enumerate(np.array([np.min(X,0),np.max(X,0)]).T):
+        extra = (finish-start)*percent_extra
+        if i not in extent_lower:
+            lower[i] = start-extra
+        else:
+            lower[i] = extent_lower[i]
+        if i not in extent_upper:
+            upper[i] = finish+extra
+        else:
+            upper[i] = extent_upper[i]
+
+        step[i] = (upper[i]-lower[i])/steps[i]
+        rangelist.append('lower[%d]:upper[%d]:step[%d]'%(i,i,i))
+        if i not in [f[0] for f in fixed_inputs]:
+            free_inputs.append(i)
+        else:
+            lower[i] = [f[1] for f in fixed_inputs if f[0]==i][0]
+            upper[i] = lower[i]+0.1
+            step[i] = 1 #just ensure one item is added
+
+    res = eval('np.mgrid[%s]'%(','.join(rangelist)))
+    
+    res_flat = []
+    for i in range(len(res)):
+        res_flat.append(res[i].flatten())
+    Xtest = np.zeros([len(res_flat[0]),X.shape[1]])
+   
+    for i, r in enumerate(res_flat):
+        Xtest[:,i] = r
+        
+    return Xtest, free_inputs, step
 
 class DPGP(object):
     """(epsilon,delta)-Differentially Private Gaussian Process predictions"""
@@ -27,13 +88,13 @@ class DPGP(object):
         self.epsilon = epsilon
         self.delta = delta
     
-    def draw_prediction_samples(self,Xtest,N=1):
+    def draw_prediction_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
         GPymean, covar = self.model.predict(Xtest)
-        mean, noise, _ = self.draw_noise_samples(Xtest,N)
+        mean, noise, cov = self.draw_noise_samples(Xtest,N,Nattempts,Nits)
         #TODO: In the long run, remove DP4GP's prediction code and just use GPy's
         #print GPymean-mean
         assert np.max(GPymean-mean)<1e-3, "DP4GP code's posterior mean prediction differs from GPy's"
-        return mean + noise.T
+        return mean + noise.T, mean, cov
     
     def plot(self):
         raise NotImplementedError #need to implemet in a subclass
@@ -67,7 +128,7 @@ class DPGP_prior(DPGP):
         noise = noise * msense
         return np.array(noise), test_cov*msense*self.sens*np.sqrt(2*np.log(2/self.delta))/self.epsilon
 
-    def draw_noise_samples(self,Xtest,N=1):
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
         raise NotImplementedError #need to implemet in a subclass
         
     #def draw_prediction_samples(self,Xtest,N=1):
@@ -81,8 +142,8 @@ class DPGP_prior(DPGP):
         p = self.model.plot(legend=False)
         xlim = p.axes.get_xlim()
         Xtest = np.arange(xlim[0],xlim[1],(xlim[1]-xlim[0])/100.0)[:,None]
-        mu = self.draw_prediction_samples(Xtest,20)
-        plt.plot(Xtest,mu,'-k',alpha=0.3);
+        noisy_mu, _, _ = self.draw_prediction_samples(Xtest,20)
+        plt.plot(Xtest,noisy_mu,'-k',alpha=0.3);
     
 class DPGP_normal_prior(DPGP_prior):
     def __init__(self,model,sens,epsilon,delta):      
@@ -99,7 +160,7 @@ class DPGP_normal_prior(DPGP_prior):
         invCov = np.linalg.inv(K_NN+sigmasqr*np.eye(K_NN.shape[0]))
         self.invCov = invCov
         
-    def draw_noise_samples(self,Xtest,N=1):
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
         """
         For a given set of test points, find DP noise samples for each
         """
@@ -117,7 +178,7 @@ class DPGP_normal_prior(DPGP_prior):
       
     
 class DPGP_pseudo_prior(DPGP_prior):
-    def draw_noise_samples(self,Xtest,N=1):
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
         """
         For a given set of test points, find DP noise samples for each
         """
@@ -228,6 +289,7 @@ class DPGP_cloaking(DPGP):
             #lr*=0.995
             if np.max(np.abs(lsbefore-ls))<1e-5:
                 return ls
+            print ".",
         print "Stopped before convergence"
         return ls
     
@@ -253,7 +315,7 @@ class DPGP_cloaking(DPGP):
         bestLogDetM = np.Inf
         bestls = None        
         for it in range(Nattempts):
-            print "."
+            print "*"
             import sys
             sys.stdout.flush()
             
@@ -306,7 +368,7 @@ class DPGP_cloaking(DPGP):
         print "Ratio"
         print approx_dL_dl/self.dL_dl(ls,cs)
 
-    def draw_noise_samples(self,Xtest,N=1):
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
         """
         Provide N samples of the DP noise
         """
@@ -316,11 +378,12 @@ class DPGP_cloaking(DPGP):
         K_Nstar = self.model.kern.K(Xtest,self.model.X)
         C = np.dot(K_Nstar,K_NNinv)
 
+        print C.shape
         cs = []
         for i in range(C.shape[1]):
             cs.append(C[:,i][:,None])
         
-        ls = self.findLambdas_repeat(cs,1,1000)
+        ls = self.findLambdas_repeat(cs,Nattempts,Nits)
         M = self.calcM(ls,cs)
         
         c = np.sqrt(2*np.log(2/self.delta))
@@ -335,13 +398,48 @@ class DPGP_cloaking(DPGP):
         ###
         return mu, samps, sampcov
     
-    def plot(self,fixed_inputs=[],N=20):
-        p = self.model.plot(fixed_inputs=fixed_inputs,legend=False)
-        xlim = p.axes.get_xlim()
+    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=10, N=10, Nattempts=1, Nits=500):
+        """
+        Plot the DP predictions, etc.
         
-        Xtest = np.arange(xlim[0],xlim[1],(xlim[1]-xlim[0])/100.0)[:,None]
-        mu = self.draw_prediction_samples(Xtest,N)
-        plt.plot(Xtest,mu,'-k',alpha=0.3)
+        In 2d it shows one DP sample, the size of the circles represent the prediction values
+        the alpha how much DP noise has been added (1->no noise, 0->20% of max-min prediction
+        
+        fixed_inputs = list of pairs
+        legend = whether to plot the legend
+        plot_data = whether to plot data
+        steps = resolution of plot
+        N = number of DP samples to plot (in 1d)
+        Nattempts = number of times a DP solution will be looked for (can help avoid local minima)
+        Nits = number of iterations when finding DP solution
+        (these last two parameters are passed to the draw_prediction_samples method).
+        """
+        Xtest, free_inputs, _ = compute_Xtest(self.model.X, fixed_inputs, extent_lower={}, steps=steps)
+        preds, mu, cov = self.draw_prediction_samples(Xtest,N,Nattempts=1,Nits=Nits)
+        self.model.plot(fixed_inputs=fixed_inputs,legend=legend,plot_data=False)
+        DPnoise = np.sqrt(np.diag(cov))
+        indx = 0
+        if len(free_inputs)==2:
+            minpred = np.min(mu)
+            maxpred = np.max(mu)
+            scaledpreds = 1+1000*(preds[:,indx]-minpred) / (maxpred-minpred)
+            scalednoise = 1-5*DPnoise/(maxpred-minpred) #proportion of data
+            #any shade implies the noise is less than 20% of the total change in the signal
+            scalednoise[scalednoise<0] = 0
+            rgba = np.zeros([len(scalednoise),4])
+            rgba[:,0] = 1.0
+            rgba[:,3] = scalednoise
+            plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,color=rgba)
+            plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,facecolors='none')
+            if plot_data: #do this bit ourselves
+                plt.plot(self.model.X[:,free_inputs[0]],self.model.X[:,free_inputs[1]],'.k',alpha=0.2)
+
+
+        if len(free_inputs)==1:
+            plt.plot(Xtest[:,free_inputs[0]],preds,alpha=0.2,color='black')
+            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise,'--k',lw=2)
+            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise,'--k',lw=2)
+
         
 class Test_DPGP_cloaking(object):
     def test(self):
