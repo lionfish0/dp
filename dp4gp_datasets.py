@@ -259,7 +259,28 @@ def setup_postcodes(pathToData):
     conn.execute('CREATE INDEX oa11s ON geo(oa11)')
     print "Complete"
     conn.close()
+   
+def prepare_preloaded_prices(filename, boundingbox=[-np.Inf,-np.Inf,np.Inf,np.Inf], N=10000, col_list=['QS501EW']):
+    """
+    Create a csv file for a specified region bounded by the boundingbox, of N points
     
+    adds columns specified by col_list (defaults to qualifications ('QS501EW'))
+    
+    boundingbox = [minEast,minNorth,maxEast,maxNorth]
+    London: [480e3, 130e3, 580e3, 230e3]
+    """
+
+    setup_postcodes('')
+    dataset = load_prices_and_postcode()
+
+    samp = (dataset['easting']>boundingbox[0]) & (dataset['easting']<boundingbox[2]) & (dataset['northing']>boundingbox[1]) & (dataset['northing']<boundingbox[3])
+    dataset = dataset[samp]
+    dataset = dataset.ix[random.sample(dataset.index, N)]
+
+    #adds column of highest qualifications
+    for col in col_list:
+        dataset = add_ons_column(dataset,col)
+    dataset.to_csv(filename)
 
 
 def load_fishlength():

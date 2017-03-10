@@ -390,6 +390,7 @@ class DPGP_cloaking(DPGP):
         Delta = self.calcDelta(ls,cs)
         #in Hall13 the constant below is multiplied by the samples,
         #here we scale the covariance by the square of this constant.
+        print(self.sens,c,Delta,self.epsilon,np.linalg.det(M))
         sampcov = ((self.sens*c*Delta/self.epsilon)**2)*M
         samps = np.random.multivariate_normal(np.zeros(len(sampcov)),sampcov,N)
         
@@ -415,6 +416,7 @@ class DPGP_cloaking(DPGP):
         (these last two parameters are passed to the draw_prediction_samples method).
         """
         Xtest, free_inputs, _ = compute_Xtest(self.model.X, fixed_inputs, extent_lower={}, steps=steps)
+        print Xtest.shape
         preds, mu, cov = self.draw_prediction_samples(Xtest,N,Nattempts=1,Nits=Nits)
         self.model.plot(fixed_inputs=fixed_inputs,legend=legend,plot_data=False)
         DPnoise = np.sqrt(np.diag(cov))

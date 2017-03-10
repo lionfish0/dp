@@ -42,7 +42,7 @@ class DPGP_histogram(dp4gp.DPGP):
     def __init__(self,sens,epsilon,delta):      
         super(DPGP_histogram, self).__init__(None,sens,epsilon,delta)
 
-    def prepare_model(self,Xtest,X,step,ys):
+    def prepare_model(self,Xtest,X,step,ys,variances=1.0,lengthscale=1):
         """
         Prepare the model, ready for making predictions"""
         bincounts, bintotals, binaverages = bin_data(Xtest,X,step,ys)
@@ -73,14 +73,16 @@ class DPGP_histogram(dp4gp.DPGP):
         finalintegralsigma = final_sigma * np.prod(step)
         
         #generate the integral model
-        kernel = GPy.kern.Multidimensional_Integral_Limits(input_dim=newXtest.shape[1], variances=1.0, lengthscale=[3e3,3e3])
+        kernel = GPy.kern.Multidimensional_Integral_Limits(input_dim=newXtest.shape[1], variances=variances, lengthscale=lengthscale)
         #we add a kernel to describe the DP noise added
         kernel = kernel + GPy.kern.WhiteHeteroscedastic(input_dim=newXtest.shape[1], num_data=len(finalintegralsigma), variance=finalintegralsigma**2)
         self.model = GPy.models.GPRegression(finalXtest,finalintegralbinaverages[:,None],kernel)
-        self.model.optimize() #TODO remove max_iters
     
-        
-    def draw_prediction_sample(self,Xtest):
+    def optimize(self):
+        self.model.optimize()
+     
+    def draw_prediction_samples(self,Xtest,N=1):
+        assert N==1, "DPGP_histogram only returns one DP prediction sample (you will need to rerun prepare_model to get an additional sample)"
         newXtest = np.zeros([Xtest.shape[0],2*Xtest.shape[1]])
         newXtest[:,0::2] = Xtest
         newXtest[:,1::2] = 0
