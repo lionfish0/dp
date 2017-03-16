@@ -59,7 +59,12 @@ def compute_Xtest(X,fixed_inputs=[],extent_lower={},extent_upper={},percent_extr
             upper[i] = lower[i]+0.1
             step[i] = 1 #just ensure one item is added
 
-    res = eval('np.mgrid[%s]'%(','.join(rangelist)))
+    evalstr = 'np.mgrid[%s]'%(','.join(rangelist))
+    res = eval(evalstr)
+    
+    #handles special case, when ndim=1, mgrid doesn't have an outer array
+    if np.ndim(res)==1: 
+        res = res[None,:]
     
     res_flat = []
     for i in range(len(res)):
@@ -93,7 +98,7 @@ class DPGP(object):
         mean, noise, cov = self.draw_noise_samples(Xtest,N,Nattempts,Nits)
         #TODO: In the long run, remove DP4GP's prediction code and just use GPy's
         #print GPymean-mean
-        assert np.max(GPymean-mean)<1e-3, "DP4GP code's posterior mean prediction differs from GPy's"
+        assert np.max(GPymean-mean)<1e-2, "DP4GP code's posterior mean prediction differs from GPy's"
         return mean + noise.T, mean, cov
     
     def plot(self):
@@ -399,7 +404,7 @@ class DPGP_cloaking(DPGP):
         ###
         return mu, samps, sampcov
     
-    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=10, N=10, Nattempts=1, Nits=500):
+    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=None, N=10, Nattempts=1, Nits=500, extent_lower={}, extent_upper={}):
         """
         Plot the DP predictions, etc.
         
@@ -415,10 +420,19 @@ class DPGP_cloaking(DPGP):
         Nits = number of iterations when finding DP solution
         (these last two parameters are passed to the draw_prediction_samples method).
         """
-        Xtest, free_inputs, _ = compute_Xtest(self.model.X, fixed_inputs, extent_lower={}, steps=steps)
+        if steps is None:
+            dims = self.model.X.shape[1]-len(fixed_inputs) #get number of dims
+            steps = int(100**(1/dims)) #1d=>100 steps, 2d=>10 steps
+        Xtest, free_inputs, _ = compute_Xtest(self.model.X, fixed_inputs, extent_lower=extent_lower, extent_upper=extent_upper, steps=steps)
         print Xtest.shape
         preds, mu, cov = self.draw_prediction_samples(Xtest,N,Nattempts=1,Nits=Nits)
-        self.model.plot(fixed_inputs=fixed_inputs,legend=legend,plot_data=False)
+
+        assert len(free_inputs)<=2, "You can't have more than two free inputs in a plot"
+        if len(free_inputs)==1:
+            pltlim = [np.min(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[0]])]
+        if len(free_inputs)==2:
+            pltlim = [[np.min(Xtest[:,free_inputs[0]]),np.min(Xtest[:,free_inputs[1]])],[np.max(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[1]])]] 
+        self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data)
         DPnoise = np.sqrt(np.diag(cov))
         indx = 0
         if len(free_inputs)==2:
@@ -441,7 +455,12 @@ class DPGP_cloaking(DPGP):
             plt.plot(Xtest[:,free_inputs[0]],preds,alpha=0.2,color='black')
             plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise,'--k',lw=2)
             plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise,'--k',lw=2)
-
+            
+            gpmu, gpvar = self.model.predict(Xtest,full_cov=False)
+            plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]-1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
+            plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]+1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
+            
+            
         
 class Test_DPGP_cloaking(object):
     def test(self):

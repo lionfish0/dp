@@ -47,7 +47,7 @@ class DPGP_histogram(dp4gp.DPGP):
         Prepare the model, ready for making predictions"""
         bincounts, bintotals, binaverages = bin_data(Xtest,X,step,ys)
         sens_per_bin = self.sens/bincounts
-        c = np.sqrt(2*np.log(2/self.delta)) #1.25 or 2 over delta?
+        c = np.sqrt(2*np.log(1.25/self.delta)) #1.25 or 2 over delta?
         bin_sigma = c*sens_per_bin/self.epsilon #noise standard deviation to add to each bin
         #add DP noise to the binaverages
         dp_binaverages=binaverages+np.random.randn(binaverages.shape[0])*bin_sigma
