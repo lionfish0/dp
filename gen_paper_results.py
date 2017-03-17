@@ -13,7 +13,6 @@ def get_house_prices():
     dataset = pd.read_csv('price_dataset10k.csv') #london, 10k purchases
 
     #Reduce the size of the dataset and split into training and test data:
-    random.seed(123)
     #dataset = dataset[dataset['years']>2005]
     dataset = dataset.ix[random.sample(dataset.index, 200)]
 
@@ -29,7 +28,6 @@ def get_house_prices():
 def get_citibike_data():
     allcb = dp4gp_datasets.load_citibike(station=None)
     subcb = allcb[allcb['usertype']=='Subscriber']
-    random.seed(123)
 
     cb = subcb.ix[random.sample(subcb.index, 5000)]
     inputs = np.c_[cb['start station latitude'],cb['end station latitude'],cb['start station longitude'],cb['end station longitude']]
@@ -89,6 +87,8 @@ def get_pseudo_prediction(training_inputs, training_ys, test_inputs, sens, eps, 
 import sys
 steps = int(sys.argv[1])
 eps = float(sys.argv[2])
+filename = sys.argv[3]
+
 
 #inputs, ys = get_house_prices()
 inputs, ys = get_citibike_data()
@@ -121,7 +121,7 @@ test_inputs = inputs[-100:,:]
 test_ys = ys[-100:][:,None]
 
 fns = [get_noDP_prediction, get_integral_prediction, get_cloaking_prediction]#,get_pseudo_prediction,get_standard_prediction]
-labels = ["No DP","Integral","Cloaking"]   #"Pseudo","Standard"]
+labels = ["No DP","Integral","Cloaking"]#,"Pseudo","Standard"]
 
 
 results = []
@@ -129,8 +129,8 @@ for fn,label in zip(fns,labels):
     preds, cov = fn(training_inputs,training_ys,test_inputs,sens,eps,0.01,10.0,1.0, kernvar, kern_ls, steps)
     RMSE = np.sqrt(np.mean((test_ys-preds)**2))
     results.append({'label':label, 'preds':preds, 'cov':cov, 'RMSE':RMSE})
-    
-textfile = open("results.txt", "a")
+
+textfile = open(filename, "a")
 resstring = "%0.3f, %d, " % (eps,steps)
 for r in results:
     resstring+= "%s, %0.5f, " % (r['label'],r['RMSE'])
