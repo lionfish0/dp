@@ -9,6 +9,7 @@ sudo apt-get install gcc
 pip install gpy
 apt-get install libsm6 libxrender1 libfontconfig1
 sudo apt-get install unzip
+sudo apt install awscli
 
 
 

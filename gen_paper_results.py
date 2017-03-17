@@ -137,3 +137,6 @@ for r in results:
 resstring+='\n';
 textfile.write(resstring)
 textfile.close()
+import os
+os.system("aws s3 cp %s s3://dpresults/%s" % (filename, filename))
+#how to detect number of instances: ps a | grep 'python\ gen_paper_results.py' | wc -l
