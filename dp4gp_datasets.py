@@ -139,10 +139,12 @@ def load_citibike(station=300,year=2016,month=6):
     return df
 
 
-def load_pricepaid():
+def load_pricepaid(since=0):
     """
     Download and load UK housing price data from the Land Registry, 2016
     Returns panda dataframe with just the price and postcode
+    
+    since = start year in dataset
     """
     #for the year's data, use: http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com/pp-2016.txt
     # for the whole history of sales use: http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com/pp-complete.csv
@@ -162,7 +164,7 @@ def load_pricepaid():
     else:
         print("Using presampled dataset.")
     pp = pd.read_csv('sampled_pp.csv')
-
+    
     #add seconds since epoch and year.
     seconds = np.zeros(len(pp))
     years = seconds.copy()
@@ -171,6 +173,8 @@ def load_pricepaid():
         years[i] = int(datetime.strptime(date, '%Y-%m-%d %H:%M').strftime("%Y"))
     pp['seconds'] = seconds
     pp['years'] = years
+    
+    pp = pp[pp['years']>since]    
     print("Loaded property prices.")
     return pp
     
@@ -194,13 +198,13 @@ def load_postcode():
         df = df.append( pd.read_csv(unzip_data_path+"/"+filename,header=None,usecols=[0,10,11],names=["postcode","easting","northing"]) )
     return df
 
-def load_prices_and_postcode():
+def load_prices_and_postcode(since=0):
     """
     Download and load both the prices and postcodes, and inner join the two tables
     
     Returns a dataframe with the postcode, price, easting and northing
     """
-    pp = load_pricepaid()
+    pp = load_pricepaid(since)
     pc = load_postcode()
     complete = pd.merge(pc,pp,on="postcode",how="inner")
     return complete
@@ -259,7 +263,7 @@ def setup_postcodes(pathToData):
     print "Complete"
     conn.close()
    
-def prepare_preloaded_prices(filename, boundingbox=[-np.Inf,-np.Inf,np.Inf,np.Inf], N=10000, col_list=['QS501EW']):
+def prepare_preloaded_prices(filename, since=0, boundingbox=[-np.Inf,-np.Inf,np.Inf,np.Inf], N=10000, col_list=['QS501EW']):
     """
     Create a csv file for a specified region bounded by the boundingbox, of N points
     
@@ -270,11 +274,14 @@ def prepare_preloaded_prices(filename, boundingbox=[-np.Inf,-np.Inf,np.Inf,np.In
     """
 
     setup_postcodes('')
-    dataset = load_prices_and_postcode()
+    dataset = load_prices_and_postcode(since)
 
     samp = (dataset['easting']>boundingbox[0]) & (dataset['easting']<boundingbox[2]) & (dataset['northing']>boundingbox[1]) & (dataset['northing']<boundingbox[3])
     dataset = dataset[samp]
-    dataset = dataset.ix[random.sample(dataset.index, N)]
+    if len(dataset)<N:
+        print("Warning: Unable to provide %d prices as only %d are in current cache" % (N, len(dataset)))
+    else:
+        dataset = dataset.ix[random.sample(dataset.index, N)]
 
     #adds column of highest qualifications
     for col in col_list:

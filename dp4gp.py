@@ -131,7 +131,8 @@ class DPGP_prior(DPGP):
         G = np.random.multivariate_normal(np.zeros(len(test_cov)),test_cov,N)
         noise = G*self.sens*np.sqrt(2*np.log(2/self.delta))/self.epsilon
         noise = noise * msense
-        return np.array(noise), test_cov*msense*self.sens*np.sqrt(2*np.log(2/self.delta))/self.epsilon
+        print msense*self.sens*np.sqrt(2*np.log(2/self.delta))/self.epsilon
+        return np.array(noise), test_cov*(msense*self.sens*np.sqrt(2*np.log(2/self.delta))/self.epsilon)**2
 
     def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
         raise NotImplementedError #need to implemet in a subclass
@@ -143,12 +144,93 @@ class DPGP_prior(DPGP):
     #    assert np.max(GPymean-mean)<1e-3, "DP4GP code's posterior mean prediction differs from GPy's"
     #    return mean + noise.T
     
-    def plot(self):
-        p = self.model.plot(legend=False)
-        xlim = p.axes.get_xlim()
-        Xtest = np.arange(xlim[0],xlim[1],(xlim[1]-xlim[0])/100.0)[:,None]
-        noisy_mu, _, _ = self.draw_prediction_samples(Xtest,20)
-        plt.plot(Xtest,noisy_mu,'-k',alpha=0.3);
+#    def plot(self):
+#        p = self.model.plot(legend=False)
+#        xlim = p.axes.get_xlim()
+#        Xtest = np.arange(xlim[0],xlim[1],(xlim[1]-xlim[0])/100.0)[:,None]
+#        noisy_mu, _, _ = self.draw_prediction_samples(Xtest,20)
+#        plt.plot(Xtest,noisy_mu,'-k',alpha=0.3);
+
+    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=None, N=10, Nattempts=1, Nits=500, extent_lower={}, extent_upper={},ys_std=1.0,ys_mean=0.0,plotGPvar=True,confidencescale=1.0):
+        """
+        Plot the DP predictions, etc.
+        
+        In 2d it shows one DP sample, the size of the circles represent the prediction values
+        the alpha how much DP noise has been added (1->no noise, 0->20% of max-min prediction
+        
+        fixed_inputs = list of pairs
+        legend = whether to plot the legend
+        plot_data = whether to plot data
+        steps = resolution of plot
+        N = number of DP samples to plot (in 1d)
+        Nattempts = number of times a DP solution will be looked for (can help avoid local minima)
+        Nits = number of iterations when finding DP solution
+        (these last two parameters are passed to the draw_prediction_samples method).
+        confidencescale = how wide the CI should be (default = 1 std.dev)
+        """
+        if steps is None:
+            dims = self.model.X.shape[1]-len(fixed_inputs) #get number of dims
+            steps = int(100**(1/dims)) #1d=>100 steps, 2d=>10 steps
+        Xtest, free_inputs, _ = compute_Xtest(self.model.X, fixed_inputs, extent_lower=extent_lower, extent_upper=extent_upper, steps=steps)
+
+        preds, mu, cov = self.draw_prediction_samples(Xtest,N,Nattempts=1,Nits=Nits)
+        preds *= ys_std
+        preds += ys_mean        
+        mu *= ys_std
+        mu += ys_mean
+        cov *= (ys_std**2)
+
+        assert len(free_inputs)<=2, "You can't have more than two free inputs in a plot"
+        if len(free_inputs)==1:
+            pltlim = [np.min(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[0]])]
+        if len(free_inputs)==2:
+            pltlim = [[np.min(Xtest[:,free_inputs[0]]),np.min(Xtest[:,free_inputs[1]])],[np.max(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[1]])]] 
+
+        
+        DPnoise = np.sqrt(np.diag(cov))
+        indx = 0
+        if len(free_inputs)==2:
+            self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data)
+            minpred = np.min(mu)
+            maxpred = np.max(mu)
+            scaledpreds = 1+1000*(preds[:,indx]-minpred) / (maxpred-minpred)
+            scalednoise = 1-5*DPnoise/(maxpred-minpred) #proportion of data
+            #any shade implies the noise is less than 20% of the total change in the signal
+            scalednoise[scalednoise<0] = 0
+            rgba = np.zeros([len(scalednoise),4])
+            rgba[:,0] = 1.0
+            rgba[:,3] = scalednoise
+            plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,color=rgba)
+            plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,facecolors='none')
+            if plot_data: #do this bit ourselves
+                plt.plot(self.model.X[:,free_inputs[0]],self.model.X[:,free_inputs[1]],'.k',alpha=0.2)
+
+
+        if len(free_inputs)==1:
+            print "One free dimension - 1d plot"
+            gpmus, gpcovs = self.model.predict(Xtest)
+            gpmus *= ys_std
+            gpmus += ys_mean
+            gpcovs *= ys_std**2
+            print "Plotting mean (%d)" % len(gpmus)
+            plt.plot(Xtest[:,free_inputs[0]],gpmus)
+            ax = plt.gca()           
+            if plotGPvar: 
+                ax.fill_between(Xtest[:,free_inputs[0]], (gpmus-np.sqrt(gpcovs))[:,0], (gpmus+np.sqrt(gpcovs))[:,0],alpha=0.1,lw=0)
+            plt.plot(Xtest[:,free_inputs[0]],preds,alpha=0.2,color='black')
+            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise*confidencescale,'--k',lw=2)
+            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise*confidencescale,'--k',lw=2)
+            plt.xlim([np.min(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[0]])])
+            
+            bound = np.std(self.model.X,0)*0.35
+            keep = np.ones(self.model.X.shape[0], dtype=bool)
+            for finp in fixed_inputs:
+               keep = (keep) & (self.model.X[:,finp[0]]>finp[1]-bound[finp[0]]) & (self.model.X[:,finp[0]]<finp[1]+bound[finp[0]])
+            plt.plot(self.model.X[keep,free_inputs[0]],ys_mean+self.model.Y[keep]*ys_std,'k.',alpha=0.4)
+            
+            #gpmu, gpvar = self.model.predict(Xtest,full_cov=False)
+            #plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]-1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
+            #plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]+1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
     
 class DPGP_normal_prior(DPGP_prior):
     def __init__(self,model,sens,epsilon,delta):      
@@ -171,7 +253,7 @@ class DPGP_normal_prior(DPGP_prior):
         """
         test_cov = self.model.kern.K(Xtest,Xtest)
         msense = self.calc_msense(self.invCov)
-        
+        print msense
         ##This code is only necessary for finding the mean (for testing it matches GPy's)
         sigmasqr = self.model.Gaussian_noise.variance[0]
         K_NN = self.model.kern.K(self.model.X)
@@ -404,7 +486,7 @@ class DPGP_cloaking(DPGP):
         ###
         return mu, samps, sampcov
     
-    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=None, N=10, Nattempts=1, Nits=500, extent_lower={}, extent_upper={}):
+    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=None, N=10, Nattempts=1, Nits=500, extent_lower={}, extent_upper={},ys_std=1.0,ys_mean=0.0,plotGPvar=True,confidencescale=1.0):
         """
         Plot the DP predictions, etc.
         
@@ -419,23 +501,33 @@ class DPGP_cloaking(DPGP):
         Nattempts = number of times a DP solution will be looked for (can help avoid local minima)
         Nits = number of iterations when finding DP solution
         (these last two parameters are passed to the draw_prediction_samples method).
+        confidencescale = how wide the CI should be (default = 1 std.dev)
         """
         if steps is None:
             dims = self.model.X.shape[1]-len(fixed_inputs) #get number of dims
-            steps = int(100**(1/dims)) #1d=>100 steps, 2d=>10 steps
+            steps = int(100.0**(1.0/dims)) #1d=>100 steps, 2d=>10 steps
         Xtest, free_inputs, _ = compute_Xtest(self.model.X, fixed_inputs, extent_lower=extent_lower, extent_upper=extent_upper, steps=steps)
-        print Xtest.shape
+
         preds, mu, cov = self.draw_prediction_samples(Xtest,N,Nattempts=1,Nits=Nits)
+        preds *= ys_std
+        preds += ys_mean        
+        mu *= ys_std
+        mu += ys_mean
+        cov *= (ys_std**2)
 
         assert len(free_inputs)<=2, "You can't have more than two free inputs in a plot"
         if len(free_inputs)==1:
             pltlim = [np.min(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[0]])]
         if len(free_inputs)==2:
             pltlim = [[np.min(Xtest[:,free_inputs[0]]),np.min(Xtest[:,free_inputs[1]])],[np.max(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[1]])]] 
-        self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data)
+
+        print free_inputs[0]
+        print Xtest[:,free_inputs[0]]
+        print pltlim
         DPnoise = np.sqrt(np.diag(cov))
         indx = 0
         if len(free_inputs)==2:
+            self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data)
             minpred = np.min(mu)
             maxpred = np.max(mu)
             scaledpreds = 1+1000*(preds[:,indx]-minpred) / (maxpred-minpred)
@@ -452,13 +544,30 @@ class DPGP_cloaking(DPGP):
 
 
         if len(free_inputs)==1:
+            #print "One free dimension - 1d plot"
+            gpmus, gpcovs = self.model.predict(Xtest)
+            gpmus *= ys_std
+            gpmus += ys_mean
+            gpcovs *= ys_std**2
+            #print "Plotting mean (%d)" % len(gpmus)
+            plt.plot(Xtest[:,free_inputs[0]],gpmus)
+            ax = plt.gca()           
+            if plotGPvar: 
+                ax.fill_between(Xtest[:,free_inputs[0]], (gpmus-np.sqrt(gpcovs))[:,0], (gpmus+np.sqrt(gpcovs))[:,0],alpha=0.1,lw=0)
             plt.plot(Xtest[:,free_inputs[0]],preds,alpha=0.2,color='black')
-            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise,'--k',lw=2)
-            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise,'--k',lw=2)
+            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise*confidencescale,'--k',lw=2)
+            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise*confidencescale,'--k',lw=2)
+            plt.xlim([np.min(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[0]])])
             
-            gpmu, gpvar = self.model.predict(Xtest,full_cov=False)
-            plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]-1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
-            plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]+1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
+            bound = np.std(self.model.X,0)*0.35
+            keep = np.ones(self.model.X.shape[0], dtype=bool)
+            for finp in fixed_inputs:
+               keep = (keep) & (self.model.X[:,finp[0]]>finp[1]-bound[finp[0]]) & (self.model.X[:,finp[0]]<finp[1]+bound[finp[0]])
+            plt.plot(self.model.X[keep,free_inputs[0]],ys_mean+self.model.Y[keep]*ys_std,'k.',alpha=0.4)
+            
+            #gpmu, gpvar = self.model.predict(Xtest,full_cov=False)
+            #plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]-1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
+            #plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]+1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
             
             
         
