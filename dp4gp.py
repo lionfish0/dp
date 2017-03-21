@@ -94,7 +94,7 @@ class DPGP(object):
         self.delta = delta
     
     def draw_prediction_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
-        GPymean, covar = self.model.predict(Xtest)
+        GPymean, covar = self.model.predict_noiseless(Xtest)
         mean, noise, cov = self.draw_noise_samples(Xtest,N,Nattempts,Nits)
         #TODO: In the long run, remove DP4GP's prediction code and just use GPy's
         #print GPymean-mean
@@ -138,7 +138,7 @@ class DPGP_prior(DPGP):
         raise NotImplementedError #need to implemet in a subclass
         
     #def draw_prediction_samples(self,Xtest,N=1):
-    #    GPymean, covar = self.model.predict(Xtest)
+    #    GPymean, covar = self.model.predict_noiseless(Xtest)
     #    mean, noise, _ = self.draw_noise_samples(Xtest,N)
     #    #TODO: In the long run, remove DP4GP's prediction code and just use GPy's
     #    assert np.max(GPymean-mean)<1e-3, "DP4GP code's posterior mean prediction differs from GPy's"
@@ -190,7 +190,7 @@ class DPGP_prior(DPGP):
         DPnoise = np.sqrt(np.diag(cov))
         indx = 0
         if len(free_inputs)==2:
-            self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data)
+            self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data,plot_raw=True)
             minpred = np.min(mu)
             maxpred = np.max(mu)
             scaledpreds = 1+1000*(preds[:,indx]-minpred) / (maxpred-minpred)
@@ -208,7 +208,7 @@ class DPGP_prior(DPGP):
 
         if len(free_inputs)==1:
             print "One free dimension - 1d plot"
-            gpmus, gpcovs = self.model.predict(Xtest)
+            gpmus, gpcovs = self.model.predict_noiseless(Xtest)
             gpmus *= ys_std
             gpmus += ys_mean
             gpcovs *= ys_std**2
@@ -228,7 +228,7 @@ class DPGP_prior(DPGP):
                keep = (keep) & (self.model.X[:,finp[0]]>finp[1]-bound[finp[0]]) & (self.model.X[:,finp[0]]<finp[1]+bound[finp[0]])
             plt.plot(self.model.X[keep,free_inputs[0]],ys_mean+self.model.Y[keep]*ys_std,'k.',alpha=0.4)
             
-            #gpmu, gpvar = self.model.predict(Xtest,full_cov=False)
+            #gpmu, gpvar = self.model.predict_noiseless(Xtest,full_cov=False)
             #plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]-1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
             #plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]+1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
     
@@ -527,25 +527,26 @@ class DPGP_cloaking(DPGP):
         DPnoise = np.sqrt(np.diag(cov))
         indx = 0
         if len(free_inputs)==2:
-            self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data)
+            print plot_data
+            self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data,plot_raw=True,resolution=300)
             minpred = np.min(mu)
             maxpred = np.max(mu)
-            scaledpreds = 1+1000*(preds[:,indx]-minpred) / (maxpred-minpred)
-            scalednoise = 1-5*DPnoise/(maxpred-minpred) #proportion of data
+            scaledpreds = 3+100*(preds[:,indx]-minpred) / (maxpred-minpred)
+            scalednoise = 1-3*DPnoise/(maxpred-minpred) #proportion of data
             #any shade implies the noise is less than 20% of the total change in the signal
             scalednoise[scalednoise<0] = 0
             rgba = np.zeros([len(scalednoise),4])
             rgba[:,0] = 1.0
             rgba[:,3] = scalednoise
             plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,color=rgba)
-            plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,facecolors='none')
+            plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,facecolors='none',alpha=0.3)
             if plot_data: #do this bit ourselves
                 plt.plot(self.model.X[:,free_inputs[0]],self.model.X[:,free_inputs[1]],'.k',alpha=0.2)
 
 
         if len(free_inputs)==1:
             #print "One free dimension - 1d plot"
-            gpmus, gpcovs = self.model.predict(Xtest)
+            gpmus, gpcovs = self.model.predict_noiseless(Xtest)
             gpmus *= ys_std
             gpmus += ys_mean
             gpcovs *= ys_std**2
@@ -565,7 +566,7 @@ class DPGP_cloaking(DPGP):
                keep = (keep) & (self.model.X[:,finp[0]]>finp[1]-bound[finp[0]]) & (self.model.X[:,finp[0]]<finp[1]+bound[finp[0]])
             plt.plot(self.model.X[keep,free_inputs[0]],ys_mean+self.model.Y[keep]*ys_std,'k.',alpha=0.4)
             
-            #gpmu, gpvar = self.model.predict(Xtest,full_cov=False)
+            #gpmu, gpvar = self.model.predict_noiseless(Xtest,full_cov=False)
             #plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]-1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
             #plt.plot(Xtest[:,free_inputs[0]],gpmu[:,0]+1.96*np.sqrt(gpvar[:,0]+np.diag(cov)),'-k',lw=2,alpha=0.4)
             
@@ -594,14 +595,14 @@ class Test_DPGP_cloaking(object):
             mod.Gaussian_noise = 0.5**2
             mod.rbf.lengthscale = 1.0
             dpgp = DPGP_cloaking(mod,sens,eps,delta)
-            muA, _ = dpgp.model.predict(Xtest)
+            muA, _ = dpgp.model.predict_noiseless(Xtest)
             pert_trainy = np.copy(trainy)
             pert_trainy[perturb_index]+=sens
             mod = GPy.models.GPRegression(trainX,pert_trainy)
             mod.Gaussian_noise = 0.5**2
             mod.rbf.lengthscale = 1.0
             dpgp = DPGP_cloaking(mod,sens,eps,delta)
-            muB, _ = dpgp.model.predict(Xtest)
+            muB, _ = dpgp.model.predict_noiseless(Xtest)
 
 
             dist = multivariate_normal(muA[:,0],sampcov)

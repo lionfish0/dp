@@ -36,7 +36,7 @@ def bin_data(Xtest,X,step,ys):
     binaverages = bintotals/bincounts
     return bincounts, bintotals, binaverages
 
-class DPGP_histogram(dp4gp.DPGP):
+class DPGP_integral_histogram(dp4gp.DPGP):
     """Using the histogram method"""
     
     def __init__(self,sens,epsilon,delta):      
@@ -58,11 +58,25 @@ class DPGP_histogram(dp4gp.DPGP):
         newXtest[:,1::2] = Xtest
 
         #we don't want outputs that have no training data in.
-        empty = np.isnan(dp_binaverages)
-        dp_binaverages[empty] = 0 #we'll make those averages zero
+        keep = ~np.isnan(dp_binaverages)
+        finalXtest = newXtest[keep,:]
+        final_dp_binaverages = dp_binaverages[keep]
 
-        self.Xtest = newXtest
-        self.dp_binaverages = dp_binaverages
+        
+        #the integral kernel takes as y the integral... 
+        #eg. if there's one dimension we're integrating over, km
+        #then we need to give y in pound.km
+        self.meanoffset = np.mean(final_dp_binaverages)
+        final_dp_binaverages-= self.meanoffset
+        finalintegralbinaverages = final_dp_binaverages * np.prod(step) 
+        final_sigma = bin_sigma[keep]
+        finalintegralsigma = final_sigma * np.prod(step)
+        
+        #generate the integral model
+        kernel = GPy.kern.Multidimensional_Integral_Limits(input_dim=newXtest.shape[1], variances=variances, lengthscale=lengthscale)
+        #we add a kernel to describe the DP noise added
+        kernel = kernel + GPy.kern.WhiteHeteroscedastic(input_dim=newXtest.shape[1], num_data=len(finalintegralsigma), variance=finalintegralsigma**2)
+        self.model = GPy.models.GPRegression(finalXtest,finalintegralbinaverages[:,None],kernel)
     
     def optimize(self):
         self.model.optimize()
@@ -72,10 +86,5 @@ class DPGP_histogram(dp4gp.DPGP):
         newXtest = np.zeros([Xtest.shape[0],2*Xtest.shape[1]])
         newXtest[:,0::2] = Xtest
         newXtest[:,1::2] = 0
-        preds = np.zeros(Xtest.shape[0])
-        for i in range(Xtest.shape[0]):
-            v = np.ones(self.Xtest.shape[0],dtype=bool)
-            for idx in range(0,Xtest.shape[1]):
-                v = v & ((Xtest[i,idx] < self.Xtest[:,idx*2]) & (Xtest[i,idx] > self.Xtest[:,idx*2+1]))        
-            preds[i] = self.dp_binaverages[v]
-        return preds, None
+        mean, cov = self.model.predict(newXtest)
+        return mean+self.meanoffset, cov
