@@ -9,7 +9,7 @@ from scipy.stats import multivariate_normal
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 
-def bin_data(Xtest,X,step,ys):
+def bin_data(Xtest,X,step,ys,aggregation):
     """
     Bin data X into equally sized bins defined by Xtest and step.
     Xtest is the coordinates of the corner of each bin.
@@ -23,6 +23,9 @@ def bin_data(Xtest,X,step,ys):
     """
     bintotals = np.zeros(Xtest.shape[0])
     bincounts = np.zeros(Xtest.shape[0])
+    if aggregation=='median':
+        binagg = [list([]) for _ in xrange(Xtest.shape[0])]
+
     for i,tile in enumerate(Xtest): #loop through the tiles
         for x,y in zip(X,ys): #loop through the data
             intile = True
@@ -33,7 +36,14 @@ def bin_data(Xtest,X,step,ys):
             if intile:
                 bintotals[i]+=y
                 bincounts[i]+=1
-    binaverages = bintotals/bincounts
+                if aggregation=='median':
+                    binagg[i].append(y)
+    if aggregation=='mean':             
+        binaverages = bintotals/bincounts
+    if aggregation=='median':
+        binaverages = np.zeros(Xtest.shape[0])
+        for i, b in enumerate(binagg):
+            binaverages[i] = np.median(b)
     return bincounts, bintotals, binaverages
 
 class DPGP_histogram(dp4gp.DPGP):
@@ -42,11 +52,14 @@ class DPGP_histogram(dp4gp.DPGP):
     def __init__(self,sens,epsilon,delta):      
         super(DPGP_histogram, self).__init__(None,sens,epsilon,delta)
 
-    def prepare_model(self,Xtest,X,step,ys,variances=1.0,lengthscale=1):
+    def prepare_model(self,Xtest,X,step,ys,variances=1.0,lengthscale=1,aggregation='mean'):
         """
         Prepare the model, ready for making predictions"""
-        bincounts, bintotals, binaverages = bin_data(Xtest,X,step,ys)
-        sens_per_bin = self.sens/bincounts
+        bincounts, bintotals, binaverages = bin_data(Xtest,X,step,ys,aggregation)
+        if aggregation=='median':
+            raise NotImplementedError
+        if aggregation=='mean':            
+            sens_per_bin = self.sens/bincounts
         c = np.sqrt(2*np.log(1.25/self.delta)) #1.25 or 2 over delta?
         bin_sigma = c*sens_per_bin/self.epsilon #noise standard deviation to add to each bin
         #add DP noise to the binaverages
@@ -63,6 +76,7 @@ class DPGP_histogram(dp4gp.DPGP):
 
         self.Xtest = newXtest
         self.dp_binaverages = dp_binaverages
+        return bincounts, bintotals, binaverages, sens_per_bin, bin_sigma, dp_binaverages
     
     def optimize(self):
         self.model.optimize()

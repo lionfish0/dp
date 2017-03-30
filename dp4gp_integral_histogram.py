@@ -40,7 +40,7 @@ class DPGP_integral_histogram(dp4gp.DPGP):
     """Using the histogram method"""
     
     def __init__(self,sens,epsilon,delta):      
-        super(DPGP_histogram, self).__init__(None,sens,epsilon,delta)
+        super(DPGP_integral_histogram, self).__init__(None,sens,epsilon,delta)
 
     def prepare_model(self,Xtest,X,step,ys,variances=1.0,lengthscale=1):
         """

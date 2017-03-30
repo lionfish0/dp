@@ -531,15 +531,15 @@ class DPGP_cloaking(DPGP):
             self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data,plot_raw=True,resolution=300)
             minpred = np.min(mu)
             maxpred = np.max(mu)
-            scaledpreds = 3+100*(preds[:,indx]-minpred) / (maxpred-minpred)
-            scalednoise = 1-3*DPnoise/(maxpred-minpred) #proportion of data
+            scaledpreds = 70+400*(preds[:,indx]-minpred) / (maxpred-minpred)
+            scalednoise = 1-2.5*DPnoise/(maxpred-minpred) #proportion of data
             #any shade implies the noise is less than 20% of the total change in the signal
             scalednoise[scalednoise<0] = 0
             rgba = np.zeros([len(scalednoise),4])
             rgba[:,0] = 1.0
             rgba[:,3] = scalednoise
             plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,color=rgba)
-            plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,facecolors='none',alpha=0.3)
+            #plt.scatter(Xtest[:,free_inputs[0]],Xtest[:,free_inputs[1]],scaledpreds,facecolors='none',alpha=0.3)
             if plot_data: #do this bit ourselves
                 plt.plot(self.model.X[:,free_inputs[0]],self.model.X[:,free_inputs[1]],'.k',alpha=0.2)
 
