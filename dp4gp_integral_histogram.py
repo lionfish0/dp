@@ -47,10 +47,14 @@ class DPGP_integral_histogram(dp4gp.DPGP):
         Prepare the model, ready for making predictions"""
         bincounts, bintotals, binaverages = bin_data(Xtest,X,step,ys)
         sens_per_bin = self.sens/bincounts
-        c = np.sqrt(2*np.log(1.25/self.delta)) #1.25 or 2 over delta?
-        bin_sigma = c*sens_per_bin/self.epsilon #noise standard deviation to add to each bin
-        #add DP noise to the binaverages
-        dp_binaverages=binaverages+np.random.randn(binaverages.shape[0])*bin_sigma
+        #Gaussian Mechanism
+        #c = np.sqrt(2*np.log(1.25/self.delta)) #1.25 or 2 over delta?
+        #bin_sigma = c*sens_per_bin/self.epsilon #noise standard deviation to add to each bin
+        ##add DP noise to the binaverages
+        #dp_binaverages=binaverages+np.random.randn(binaverages.shape[0])*bin_sigma
+        s = np.array(sens_per_bin / self.epsilon)
+        dp_binaverages=binaverages+np.random.laplace(scale=s)#,size=binaverages.shape[0])
+        
 
         #we need to build the input for the integral kernel
         newXtest = np.zeros([Xtest.shape[0],2*Xtest.shape[1]])
@@ -61,6 +65,7 @@ class DPGP_integral_histogram(dp4gp.DPGP):
         keep = ~np.isnan(dp_binaverages)
         finalXtest = newXtest[keep,:]
         final_dp_binaverages = dp_binaverages[keep]
+        s = s[keep]
 
         
         #the integral kernel takes as y the integral... 
@@ -69,7 +74,7 @@ class DPGP_integral_histogram(dp4gp.DPGP):
         self.meanoffset = np.mean(final_dp_binaverages)
         final_dp_binaverages-= self.meanoffset
         finalintegralbinaverages = final_dp_binaverages * np.prod(step) 
-        final_sigma = bin_sigma[keep]
+        final_sigma = 2.0*(s**2) #I've no idea but optimizer will find this later... #bin_sigma[keep]
         finalintegralsigma = final_sigma * np.prod(step)
         
         #generate the integral model
