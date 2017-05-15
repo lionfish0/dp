@@ -366,7 +366,8 @@ class DPGP_cloaking(DPGP):
             ls = vector of lambdas
 
         """
-        ls = np.ones(len(cs))*0.7
+        #ls = np.ones(len(cs))*0.7
+        ls = 0.1*np.random.rand(len(cs))*0.8 #random numbers between 0.1 and 0.9
         lr = 0.05 #learning rate
         for it in range(maxit): 
             lsbefore = ls.copy()
@@ -455,15 +456,28 @@ class DPGP_cloaking(DPGP):
         print "Ratio"
         print approx_dL_dl/self.dL_dl(ls,cs)
 
-    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
+    def get_C(self,Xtest):
         """
-        Provide N samples of the DP noise
+        Compute the value of the cloaking matrix (K_Nstar . K_NN^-1)
         """
         sigmasqr = self.model.Gaussian_noise.variance[0]
         K_NN = self.model.kern.K(self.model.X)
         K_NNinv = np.linalg.inv(K_NN+sigmasqr*np.eye(K_NN.shape[0]))
         K_Nstar = self.model.kern.K(Xtest,self.model.X)
         C = np.dot(K_Nstar,K_NNinv)
+        return C
+    
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
+        """
+        Provide N samples of the DP noise
+        """
+        #moved computation to seperate method so I can use C for other things
+        C = self.get_C(Xtest)
+        #sigmasqr = self.model.Gaussian_noise.variance[0]
+        #K_NN = self.model.kern.K(self.model.X)
+        #K_NNinv = np.linalg.inv(K_NN+sigmasqr*np.eye(K_NN.shape[0]))
+        #K_Nstar = self.model.kern.K(Xtest,self.model.X)
+        #C = np.dot(K_Nstar,K_NNinv)
 
         print C.shape
         cs = []
