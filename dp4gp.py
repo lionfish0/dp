@@ -151,7 +151,7 @@ class DPGP_prior(DPGP):
 #        noisy_mu, _, _ = self.draw_prediction_samples(Xtest,20)
 #        plt.plot(Xtest,noisy_mu,'-k',alpha=0.3);
 
-    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=None, N=10, Nattempts=1, Nits=500, extent_lower={}, extent_upper={},ys_std=1.0,ys_mean=0.0,plotGPvar=True,confidencescale=1.0):
+    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=None, N=10, Nattempts=1, Nits=500, extent_lower={}, extent_upper={},ys_std=1.0,ys_mean=0.0,plotGPvar=True,confidencescale=[1.0]):
         """
         Plot the DP predictions, etc.
         
@@ -166,7 +166,7 @@ class DPGP_prior(DPGP):
         Nattempts = number of times a DP solution will be looked for (can help avoid local minima)
         Nits = number of iterations when finding DP solution
         (these last two parameters are passed to the draw_prediction_samples method).
-        confidencescale = how wide the CI should be (default = 1 std.dev)
+        confidencescale = list of how wide the CI should be (default = 1 std.dev)
         """
         if steps is None:
             dims = self.model.X.shape[1]-len(fixed_inputs) #get number of dims
@@ -218,8 +218,15 @@ class DPGP_prior(DPGP):
             if plotGPvar: 
                 ax.fill_between(Xtest[:,free_inputs[0]], (gpmus-np.sqrt(gpcovs))[:,0], (gpmus+np.sqrt(gpcovs))[:,0],alpha=0.1,lw=0)
             plt.plot(Xtest[:,free_inputs[0]],preds,alpha=0.2,color='black')
-            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise*confidencescale,'--k',lw=2)
-            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise*confidencescale,'--k',lw=2)
+            if not isinstance(confidencescale,list):
+                confidencescale = [confidencescale]
+            
+            a = 1
+            for i,cs in enumerate(confidencescale):
+                plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise*cs,'--k',lw=2,alpha=a)
+                plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise*cs,'--k',lw=2,alpha=a)            
+                a = a * 0.5
+
             plt.xlim([np.min(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[0]])])
             
             bound = np.std(self.model.X,0)*0.35
@@ -500,7 +507,7 @@ class DPGP_cloaking(DPGP):
         ###
         return mu, samps, sampcov
     
-    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=None, N=10, Nattempts=1, Nits=500, extent_lower={}, extent_upper={},ys_std=1.0,ys_mean=0.0,plotGPvar=True,confidencescale=1.0):
+    def plot(self,fixed_inputs=[],legend=False,plot_data=False, steps=None, N=10, Nattempts=1, Nits=500, extent_lower={}, extent_upper={},ys_std=1.0,ys_mean=0.0,plotGPvar=True,confidencescale=[1.0]):
         """
         Plot the DP predictions, etc.
         
@@ -570,8 +577,16 @@ class DPGP_cloaking(DPGP):
             if plotGPvar: 
                 ax.fill_between(Xtest[:,free_inputs[0]], (gpmus-np.sqrt(gpcovs))[:,0], (gpmus+np.sqrt(gpcovs))[:,0],alpha=0.1,lw=0)
             plt.plot(Xtest[:,free_inputs[0]],preds,alpha=0.2,color='black')
-            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise*confidencescale,'--k',lw=2)
-            plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise*confidencescale,'--k',lw=2)
+            
+            if not isinstance(confidencescale,list):
+                confidencescale = [confidencescale]
+                
+            a = 1
+            for i,cs in enumerate(confidencescale):
+                plt.plot(Xtest[:,free_inputs[0]],mu[:,0]-DPnoise*cs,'--k',lw=2,alpha=a)
+                plt.plot(Xtest[:,free_inputs[0]],mu[:,0]+DPnoise*cs,'--k',lw=2,alpha=a)            
+                a = a * 0.5
+                
             plt.xlim([np.min(Xtest[:,free_inputs[0]]),np.max(Xtest[:,free_inputs[0]])])
             
             bound = np.std(self.model.X,0)*0.35
