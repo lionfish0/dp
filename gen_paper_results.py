@@ -3,7 +3,7 @@ import dp4gp
 import random
 import numpy as np
 import GPy
-import dp4gp_histogram
+import dp4gp_integral_histogram
 import pandas as pd
 
 def get_house_prices():
@@ -51,16 +51,16 @@ def get_cloaking_prediction(training_inputs, training_ys, test_inputs, sens, eps
     mod = GPy.models.GPRegression(training_inputs,training_ys,rbf)
     mod.Gaussian_noise = noise
     dpgp = dp4gp.DPGP_cloaking(mod,sens,eps,delta)
-    preds, mu, cov = dpgp.draw_prediction_samples(test_inputs,1,1,1000)
+    preds, mu, cov = dpgp.draw_prediction_samples(test_inputs,1,2,1000)
     return preds, cov
     
 def get_integral_prediction(training_inputs, training_ys, test_inputs, sens, eps, delta,noise,modvar,kernval,kern_ls,steps):
     Xtest, free_inputs, step = dp4gp.compute_Xtest(training_inputs,steps=steps)
     print step
-    dpgp = dp4gp_histogram.DPGP_histogram(sens,eps,delta)
+    dpgp = dp4gp_integral_histogram.DPGP_integral_histogram(sens,eps,delta)
     dpgp.prepare_model(Xtest,training_inputs,step,training_ys,lengthscale=kern_ls)
     #dpgp.optimize()
-    dpgp.model.optimize(messages=True)
+    dpgp.model.optimize(messages=True)#, max_iters=2)
     preds, cov = dpgp.draw_prediction_samples(test_inputs)
     return preds, cov
 
@@ -83,11 +83,16 @@ def get_pseudo_prediction(training_inputs, training_ys, test_inputs, sens, eps, 
     dpgp = dp4gp.DPGP_pseudo_prior(mod,sens,eps,delta)
     preds, mu, cov = dpgp.draw_prediction_samples(test_inputs,1)
     return preds, cov
+
+#import os
+#os.system("aws s3 cp working.txt s3://dpresults/working.txt")
     
 import sys
 steps = int(sys.argv[1])
 eps = float(sys.argv[2])
-filename = sys.argv[3]
+lengthscale = float(sys.argv[3])
+gaussian_noise = float(sys.argv[4])
+filename = sys.argv[5]
 
 
 #inputs, ys = get_house_prices()
@@ -99,7 +104,7 @@ ys[ys>2000] = 2000
 ys[ys<0] = 0
 sens = 2000-0
 kernvar = 10.0
-kern_ls = np.array([0.01,0.01,0.01,0.01])*5.0
+kern_ls = np.array([lengthscale,lengthscale,lengthscale,lengthscale]) #0.05
 
 #FOR HOUSE PRICES
 #squash data into gbp10k-500k range
@@ -115,23 +120,30 @@ ys = ys - ys_mean
 ys = ys / ys_std
 sens = sens / ys_std
 
+if (eps>10000.0):
+    eps = 1.0
+    sens = 0.0001
+
 training_inputs = inputs[0:-100,:]
 training_ys = ys[0:-100][:,None]
 test_inputs = inputs[-100:,:]
 test_ys = ys[-100:][:,None]
 
-fns = [get_noDP_prediction, get_integral_prediction, get_cloaking_prediction]#,get_pseudo_prediction,get_standard_prediction]
-labels = ["No DP","Integral","Cloaking"]#,"Pseudo","Standard"]
+#fns = [get_noDP_prediction, get_integral_prediction, get_cloaking_prediction]#,get_pseudo_prediction,get_standard_prediction]
+#labels = ["No DP","Integral","Cloaking"]#,"Pseudo","Standard"]
 
+#fns = [get_integral_prediction]#, 
+fns = [get_cloaking_prediction]
+labels = ["Cloaking"]#["Integral"]#,"Cloaking"]
 
 results = []
 for fn,label in zip(fns,labels):
-    preds, cov = fn(training_inputs,training_ys,test_inputs,sens,eps,0.01,10.0,1.0, kernvar, kern_ls, steps)
+    preds, cov = fn(training_inputs,training_ys,test_inputs,sens,eps,0.01,gaussian_noise,1.0, kernvar, kern_ls, steps)
     RMSE = np.sqrt(np.mean((test_ys-preds)**2))
     results.append({'label':label, 'preds':preds, 'cov':cov, 'RMSE':RMSE})
 
 textfile = open(filename, "a")
-resstring = "%0.3f, %d, " % (eps,steps)
+resstring = "%0.5f, %0.5f, %0.5f, %0.5f, %d, %0.5f, %0.5f " % (sens,ys_mean,ys_std,eps,steps,lengthscale,gaussian_noise)
 for r in results:
     resstring+= "%s, %0.5f, " % (r['label'],r['RMSE'])
 resstring+='\n';
