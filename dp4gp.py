@@ -93,12 +93,12 @@ class DPGP(object):
         self.epsilon = epsilon
         self.delta = delta
     
-    def draw_prediction_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
+    def draw_prediction_samples(self,Xtest,N=1,Nattempts=7,Nits=1000,verbose=False):
         GPymean, covar = self.model.predict_noiseless(Xtest)
-        mean, noise, cov = self.draw_noise_samples(Xtest,N,Nattempts,Nits)
+        mean, noise, cov = self.draw_noise_samples(Xtest,N,Nattempts,Nits,verbose=verbose)
         #TODO: In the long run, remove DP4GP's prediction code and just use GPy's
         #print GPymean-mean
-        assert np.max(GPymean-mean)<1e-2, "DP4GP code's posterior mean prediction differs from GPy's"
+        #assert np.max(GPymean-mean)<1e-2, "DP4GP code's posterior mean prediction differs from GPy's by %0.5f" % (np.max(GPymean-mean))
         return mean + noise.T, mean, cov
     
     def plot(self):
@@ -134,7 +134,7 @@ class DPGP_prior(DPGP):
         print msense*self.sens*np.sqrt(2*np.log(2/self.delta))/self.epsilon
         return np.array(noise), test_cov*(msense*self.sens*np.sqrt(2*np.log(2/self.delta))/self.epsilon)**2
 
-    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000,verbose=False):
         raise NotImplementedError #need to implemet in a subclass
         
     #def draw_prediction_samples(self,Xtest,N=1):
@@ -166,7 +166,7 @@ class DPGP_prior(DPGP):
         Nattempts = number of times a DP solution will be looked for (can help avoid local minima)
         Nits = number of iterations when finding DP solution
         (these last two parameters are passed to the draw_prediction_samples method).
-        confidencescale = list of how wide the CI should be (default = 1 std.dev)
+        confidencescale = list of how wide the CIs should be (default = 1 std.dev)
         """
         if steps is None:
             dims = self.model.X.shape[1]-len(fixed_inputs) #get number of dims
@@ -254,7 +254,7 @@ class DPGP_normal_prior(DPGP_prior):
         invCov = np.linalg.inv(K_NN+sigmasqr*np.eye(K_NN.shape[0]))
         self.invCov = invCov
         
-    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000,verbose=False):
         """
         For a given set of test points, find DP noise samples for each
         """
@@ -272,7 +272,7 @@ class DPGP_normal_prior(DPGP_prior):
       
     
 class DPGP_pseudo_prior(DPGP_prior):
-    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000,verbose=False):
         """
         For a given set of test points, find DP noise samples for each
         """
@@ -301,9 +301,8 @@ class DPGP_pseudo_prior(DPGP_prior):
 
         #find the mean at each test point
         pseudo_mu = np.dot(     np.dot(np.dot(K_star, np.linalg.inv(Q)),K_NM.T) *  diag  ,self.model.Y)
-        #un-normalise our estimates of the mean (one using the pseudo inputs, and one using normal GP regression)
 
-        #find the covariance for the two methods (pseudo and normal)
+        #find the covariance
         #K_pseudoInv is the matrix in: mu = k_* K_pseudoInv y
         #i.e. it does the job of K^-1 for the inducing inputs case
         K_pseudoInv = np.dot(np.linalg.inv(Q),K_NM.T) * diag
@@ -362,7 +361,7 @@ class DPGP_cloaking(DPGP):
             grads[j] = -np.trace(np.dot(Minv,np.dot(cs[j],cs[j].T)))     
         return np.array(grads)+1
     
-    def findLambdas_grad(self, cs, maxit=700):
+    def findLambdas_grad(self, cs, maxit=700,verbose=False):
         """
         Gradient descent to find the lambda_is
 
@@ -384,11 +383,11 @@ class DPGP_cloaking(DPGP):
             #lr*=0.995
             if np.max(np.abs(lsbefore-ls))<1e-5:
                 return ls
-            print ".",
-        print "Stopped before convergence"
+            if verbose: print ".",
+        if verbose: print "Stopped before convergence"
         return ls
     
-    def findLambdas_scipy(self,cs, maxit=1000):
+    def findLambdas_scipy(self,cs, maxit=1000, verbose=False):
         """
         Find optimum value of lambdas, start optimiser with random lambdas.
         """
@@ -403,18 +402,18 @@ class DPGP_cloaking(DPGP):
         #print ls
         return ls
     
-    def findLambdas_repeat(self,cs,Nattempts=7,Nits=1000):
+    def findLambdas_repeat(self,cs,Nattempts=7,Nits=1000, verbose=False):
         """
         Call findLambdas repeatedly with different start lambdas, to avoid local minima
         """
         bestLogDetM = np.Inf
         bestls = None        
         for it in range(Nattempts):
-            print "*"
+            if verbose: print "*",
             import sys
             sys.stdout.flush()
             
-            ls = self.findLambdas_grad(cs,Nits)
+            ls = self.findLambdas_grad(cs,Nits,verbose=verbose)
             if np.min(ls)<-0.01:
                 continue
             M = self.calcM(ls,cs)
@@ -424,7 +423,6 @@ class DPGP_cloaking(DPGP):
                 bestls = ls.copy()
         if bestls is None:
             print "Failed to find solution"
-        #print bestls
         return bestls
     
     def calcDelta(self,ls,cs):
@@ -474,31 +472,25 @@ class DPGP_cloaking(DPGP):
         C = np.dot(K_Nstar,K_NNinv)
         return C
     
-    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000):
+    def draw_noise_samples(self,Xtest,N=1,Nattempts=7,Nits=1000,verbose=False):
         """
         Provide N samples of the DP noise
         """
         #moved computation to seperate method so I can use C for other things
         C = self.get_C(Xtest)
-        #sigmasqr = self.model.Gaussian_noise.variance[0]
-        #K_NN = self.model.kern.K(self.model.X)
-        #K_NNinv = np.linalg.inv(K_NN+sigmasqr*np.eye(K_NN.shape[0]))
-        #K_Nstar = self.model.kern.K(Xtest,self.model.X)
-        #C = np.dot(K_Nstar,K_NNinv)
 
-        print C.shape
         cs = []
         for i in range(C.shape[1]):
             cs.append(C[:,i][:,None])
         
-        ls = self.findLambdas_repeat(cs,Nattempts,Nits)
+        ls = self.findLambdas_repeat(cs,Nattempts,Nits,verbose=verbose)
         M = self.calcM(ls,cs)
         
         c = np.sqrt(2*np.log(2/self.delta))
         Delta = self.calcDelta(ls,cs)
         #in Hall13 the constant below is multiplied by the samples,
         #here we scale the covariance by the square of this constant.
-        print(self.sens,c,Delta,self.epsilon,np.linalg.det(M))
+        if verbose: print(self.sens,c,Delta,self.epsilon,np.linalg.det(M))
         sampcov = ((self.sens*c*Delta/self.epsilon)**2)*M
         samps = np.random.multivariate_normal(np.zeros(len(sampcov)),sampcov,N)
         
@@ -517,7 +509,7 @@ class DPGP_cloaking(DPGP):
         fixed_inputs = list of pairs
         legend = whether to plot the legend
         plot_data = whether to plot data
-        steps = resolution of plot
+        steps = resolution of each plot axis (defaults to 100 in 1d, 10x10=100 in 2d, 4x4x4=64 in 3d, 3^4=81 in 4d,...)
         N = number of DP samples to plot (in 1d)
         Nattempts = number of times a DP solution will be looked for (can help avoid local minima)
         Nits = number of iterations when finding DP solution
@@ -529,7 +521,7 @@ class DPGP_cloaking(DPGP):
             steps = int(100.0**(1.0/dims)) #1d=>100 steps, 2d=>10 steps
         Xtest, free_inputs, _ = compute_Xtest(self.model.X, fixed_inputs, extent_lower=extent_lower, extent_upper=extent_upper, steps=steps)
 
-        preds, mu, cov = self.draw_prediction_samples(Xtest,N,Nattempts=1,Nits=Nits)
+        preds, mu, cov = self.draw_prediction_samples(Xtest,N,Nattempts=1,Nits=Nits,verbose=verbose)
         preds *= ys_std
         preds += ys_mean        
         mu *= ys_std
@@ -552,7 +544,7 @@ class DPGP_cloaking(DPGP):
             self.model.plot(plot_limits=pltlim,fixed_inputs=fixed_inputs,legend=legend,plot_data=plot_data,plot_raw=True,resolution=300)
             minpred = np.min(mu)
             maxpred = np.max(mu)
-            scaledpreds = 70+400*(preds[:,indx]-minpred) / (maxpred-minpred)
+            scaledpreds = (70+600*(preds[:,indx]-minpred) / (maxpred-minpred)) / np.sqrt(steps)
             scalednoise = 1-2.5*DPnoise/(maxpred-minpred) #proportion of data
             #any shade implies the noise is less than 20% of the total change in the signal
             scalednoise[scalednoise<0] = 0
@@ -648,3 +640,49 @@ class Test_DPGP_cloaking(object):
 
             largest_notDP = np.max([largest_notDP,proportion_notDP_A,proportion_notDP_B])
         print "The largest proportion of values exceeding the epsilon-DP constraint is %0.6f. This should be less than delta, which equals %0.6f" % (largest_notDP, dpgp.delta)
+        
+class DPGP_inducing_cloaking(DPGP_cloaking):
+    """Using Cloaking and Inducing inputs
+    
+        model = GPy model, this needs to be a SparseGPRegression model, it will
+        have its inference method set to FITC
+        Z = inducing input locations. Currently uses whatever was set in the model.
+        TO DO: If a number, then k-means clustering will
+        be used to select the inducing inputs. Also can be a numpy array of
+        locations. If unset, it will assume 10 inducing inputs.
+        HOW DOES GPy SELECT THE DEFAULT LOCATIONS?
+    """
+    def __init__(self,model,sens,epsilon,delta,Z = None):
+        super(DPGP_cloaking, self).__init__(model,sens,epsilon,delta)    
+        self.model.inference_method = GPy.inference.latent_function_inference.FITC() #make GPy's match our own sparse method
+        assert type(self.model)==GPy.models.sparse_gp_regression.SparseGPRegression
+        
+    def get_C(self,Xtest):
+        """
+        Compute the value of the cloaking matrix, overrides DPGP and uses inducing inputs
+        """
+
+        test_cov = self.model.kern.K(Xtest,Xtest)
+        sigmasqr = self.model.Gaussian_noise.variance[0]
+        K_NN_diags = self.model.kern.Kdiag(self.model.X)
+        K_NN = self.model.kern.K(self.model.X)
+        
+        K_star = self.model.kern.K(Xtest,self.model.Z.values)
+        print self.model.Z.values
+        K_NM = self.model.kern.K(self.model.X,self.model.Z.values)
+        K_MM = self.model.kern.K(self.model.Z.values)
+        invK_MM = np.linalg.inv(K_MM)
+        
+        #lambda values are the diagonal of the training input covariances minus 
+        #(cov of training+pseudo).(inv cov of pseudo).(transpose of cov of training+pseudo)
+        lamb = np.zeros(len(self.model.X))
+        for i,t_in in enumerate(self.model.X):
+            lamb[i] = K_NN_diags[i] - np.dot(np.dot(K_NM[i,:].T,invK_MM),K_NM[i,:])
+
+        #this finds (\Lambda + \sigma^2 I)^{-1}
+        diag = 1.0/(lamb + sigmasqr) #diagonal values
+
+        Q = K_MM + np.dot(K_NM.T * diag,K_NM)
+        C = np.dot(np.dot(K_star, np.linalg.inv(Q)),K_NM.T) *  diag
+        return C
+    
